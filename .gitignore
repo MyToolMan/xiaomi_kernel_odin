@@ -153,3 +153,11 @@ arch/*/configs/vendor/*_defconfig
 # vendor device tree directories
 arch/arm/boot/dts/vendor
 arch/arm64/boot/dts/vendor
+
+# ODIN non-interactive build output
+/out-odin/
+
+# GitHub Actions workflows are active project source, not transient dotfiles.
+!/.github/
+!/.github/workflows/
+!/.github/workflows/build.yml

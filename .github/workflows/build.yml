@@ -1,0 +1,75 @@
+name: ODIN kernel build
+
+on:
+  workflow_dispatch:
+    inputs:
+      root_flavor:
+        description: Root implementation to embed
+        required: true
+        default: sukisu
+        type: choice
+        options:
+          - sukisu
+          - kernelsu
+          - kernelsu-next
+          - mksu
+          - none
+  push:
+    branches:
+      - master
+      - 'codex/odin-*'
+    paths:
+      - '.github/workflows/build.yml'
+      - 'scripts/ci/**'
+      - 'scripts/root/**'
+      - 'scripts/AnyKernel3/**'
+      - 'scripts/clang-r383902b1/**'
+      - 'arch/arm64/configs/odin_defconfig'
+      - 'drivers/kernelsu/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: odin-build-${{ github.ref }}-${{ inputs.root_flavor || 'sukisu' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      ROOT_FLAVOR: ${{ inputs.root_flavor || 'sukisu' }}
+      TZ: Asia/Shanghai
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            bc bison flex cpio libssl-dev libelf-dev libncurses-dev \
+            zip unzip rsync zstd lz4 xz-utils python3 perl pahole \
+            gcc g++ make gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build kernel and AnyKernel package
+        run: bash scripts/ci/build_odin.sh
+
+      - name: Upload ODIN kernel
+        uses: actions/upload-artifact@v7
+        with:
+          name: odin-${{ env.ROOT_FLAVOR }}-${{ github.sha }}
+          if-no-files-found: error
+          path: out-odin/artifacts/
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: odin-${{ env.ROOT_FLAVOR }}-failure-${{ github.sha }}
+          if-no-files-found: warn
+          path: out-odin/
