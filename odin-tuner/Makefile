@@ -5,7 +5,7 @@ MODULE_ZIP := ../odin-tuner-v0.1.0.zip
 
 build:
 	cd src && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o ../$(BINARY) .
-	chmod 755 $(BINARY) bin/start-web.sh service.sh uninstall.sh
+	chmod 755 $(BINARY) bin/start-web.sh service.sh uninstall.sh action.sh customize.sh
 
 package: build
 	rm -f $(MODULE_ZIP)
