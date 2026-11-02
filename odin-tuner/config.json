@@ -1,0 +1,5 @@
+{
+  "cpu_throttle_temp": 85,
+  "gpu_throttle_temp": 85,
+  "hard_limit_temp": 95
+}

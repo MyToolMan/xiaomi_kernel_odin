@@ -9,6 +9,10 @@ BIN="$MODDIR/bin/odin-tuner"
 
 mkdir -p "$DATA_DIR/backup" "$LOG_DIR"
 chmod 700 "$DATA_DIR" "$DATA_DIR/backup" "$LOG_DIR"
+if [ ! -f "$DATA_DIR/config.json" ]; then
+  cp "$MODDIR/config.json" "$DATA_DIR/config.json"
+  chmod 600 "$DATA_DIR/config.json"
+fi
 
 if [ -s "$PID_FILE" ]; then
   old_pid=$(cat "$PID_FILE" 2>/dev/null)
