@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ODIN Tuner</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; padding: 24px; background: #111318; color: #eef1f7; }
+    main { max-width: 760px; margin: auto; }
+    h1 { margin: 0 0 6px; font-size: 28px; }
+    .muted { color: #9da6b8; }
+    .status { margin: 18px 0; padding: 14px; border-radius: 14px; background: #1c2029; }
+    .error { color: #ff9d9d; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; overflow: hidden; border-radius: 12px; }
+    th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid #303542; }
+    th { background: #202530; color: #b9c2d4; font-weight: 600; }
+    code { color: #93d7ff; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>ODIN Tuner</h1>
+  <div class="muted">只读快照 · 每 2 秒刷新</div>
+  <div id="status" class="status">正在连接 daemon…</div>
+  <section>
+    <h2>CPU</h2>
+    <table><thead><tr><th>CPU</th><th>当前 MHz</th><th>上限 MHz</th><th>Governor</th></tr></thead><tbody id="cpu"></tbody></table>
+  </section>
+  <section>
+    <h2>GPU</h2>
+    <div id="gpu" class="status">无数据</div>
+  </section>
+  <section>
+    <h2>温度最高的节点</h2>
+    <table><thead><tr><th>Zone</th><th>Type</th><th>温度</th></tr></thead><tbody id="temps"></tbody></table>
+  </section>
+</main>
+<script>
+const statusEl = document.querySelector('#status');
+const cpuEl = document.querySelector('#cpu');
+const gpuEl = document.querySelector('#gpu');
+const tempsEl = document.querySelector('#temps');
+
+function cell(value) {
+  const td = document.createElement('td');
+  td.textContent = value ?? '—';
+  return td;
+}
+
+async function refresh() {
+  try {
+    const response = await fetch('/snapshot', {cache: 'no-store'});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    statusEl.textContent = `快照 ${data.generated_at} · 最高温 ${data.max_temp_c ?? '—'} °C`;
+    statusEl.className = 'status';
+
+    cpuEl.replaceChildren(...(data.cpu || []).map(cpu => {
+      const tr = document.createElement('tr');
+      tr.append(cell(cpu.cpu), cell(cpu.current_mhz), cell(cpu.max_mhz), cell(cpu.governor));
+      return tr;
+    }));
+
+    gpuEl.textContent = data.gpu
+      ? `${data.gpu.current_mhz} MHz / 上限 ${data.gpu.max_mhz} MHz · ${data.gpu.governor || '—'}`
+      : `不可用${data.gpu_error ? `：${data.gpu_error}` : ''}`;
+
+    const hottest = [...(data.thermal || [])]
+      .filter(z => typeof z.temp_c === 'number')
+      .sort((a, b) => b.temp_c - a.temp_c)
+      .slice(0, 12);
+    tempsEl.replaceChildren(...hottest.map(zone => {
+      const tr = document.createElement('tr');
+      tr.append(cell(zone.zone), cell(zone.type), cell(`${zone.temp_c.toFixed(1)} °C`));
+      return tr;
+    }));
+  } catch (error) {
+    statusEl.textContent = `daemon 不可用：${error.message}`;
+    statusEl.className = 'status error';
+  }
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
