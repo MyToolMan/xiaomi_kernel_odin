@@ -153,3 +153,7 @@ arch/*/configs/vendor/*_defconfig
 # vendor device tree directories
 arch/arm/boot/dts/vendor
 arch/arm64/boot/dts/vendor
+
+# ODIN userspace build outputs
+/out-odin/
+/odin-tuner-v*.zip
