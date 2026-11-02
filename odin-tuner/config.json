@@ -1,5 +1,8 @@
 {
   "cpu_throttle_temp": 85,
   "gpu_throttle_temp": 85,
-  "hard_limit_temp": 95
+  "hard_limit_temp": 95,
+  "auth_mode": "off",
+  "fixed_token": "",
+  "web_autostart": true
 }

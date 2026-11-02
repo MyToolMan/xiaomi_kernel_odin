@@ -35,9 +35,14 @@
     header { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
     h1 { margin: 0; font-size: 34px; letter-spacing: -0.02em; }
     .subtitle { color: var(--muted); font-size: 17px; }
-    #status { padding: 8px 13px; border: 1px solid var(--panel-edge); border-radius: 999px; color: var(--muted); font-size: 15px; }
-    #status.live { color: var(--little); }
-    #status.error { color: var(--battery); }
+    .header-status { display: flex; align-items: center; gap: 14px; }
+    #connection { padding: 8px 13px; border: 1px solid var(--panel-edge); border-radius: 999px; color: var(--muted); font-size: 15px; }
+    #connection::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: currentColor; }
+    #connection.live { color: var(--little); }
+    #connection.connecting { color: var(--prime); }
+    #connection.disconnected { color: var(--battery); }
+    #last-update { min-width: 260px; color: var(--muted); font-size: 15px; text-align: right; }
+    #last-update.alarm { color: var(--battery); }
     .grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; }
     .card { min-height: 0; display: flex; flex-direction: column; padding: 16px 18px 12px; border: 1px solid var(--panel-edge); border-radius: 18px; background: linear-gradient(180deg, rgba(29,39,56,.96), rgba(17,23,34,.96)); box-shadow: 0 14px 35px rgba(0,0,0,.22); }
     .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 8px; }
@@ -61,7 +66,10 @@
       <h1>ODIN Tuner</h1>
       <div class="subtitle">MIX4 · 实时只读性能快照 · SSE</div>
     </div>
-    <div id="status">正在连接 daemon…</div>
+    <div class="header-status">
+      <div id="last-update">最后更新 —</div>
+      <div id="connection" class="connecting">正在连接 SSE…</div>
+    </div>
   </header>
   <div class="grid">
     <section class="card">
@@ -95,10 +103,19 @@
   </div>
 </main>
 <script>
-const statusEl = document.querySelector('#status');
+const connectionEl = document.querySelector('#connection');
+const lastUpdateEl = document.querySelector('#last-update');
 const token = new URLSearchParams(location.search).get('token');
-const maxPoints = 240;
+const streamUrl = token ? `/stream?token=${encodeURIComponent(token)}` : '/stream';
+const maxPoints = 120;
+const reconnectMax = 30000;
 let sequence = 0;
+let source = null;
+let reconnectDelay = 1000;
+let reconnectTimer = null;
+let lastMessageAt = 0;
+let renderScheduled = false;
+let lastRenderAt = 0;
 const colors = {
   little: '#65d49a', mid: '#72a8ff', prime: '#ffbf69',
   gpu: '#e78cff', battery: '#ff7d87', board: '#68d8ed', memory: '#b6c4d8'
@@ -110,28 +127,49 @@ const series = {
   current: {battery: []}
 };
 
-if (!token) {
-  statusEl.textContent = '缺少访问 token';
-  statusEl.className = 'error';
-} else {
-  const source = new EventSource(`/stream?token=${encodeURIComponent(token)}`);
-  source.onopen = () => {
-    statusEl.textContent = 'SSE 已连接';
-    statusEl.className = 'live';
+function setConnection(state, text) {
+  connectionEl.className = state;
+  connectionEl.textContent = text;
+}
+
+function connectStream() {
+  if (source || reconnectTimer) return;
+  setConnection('connecting', 'SSE 重连中…');
+  const current = new EventSource(streamUrl);
+  source = current;
+  current.onopen = () => {
+    if (source !== current) return;
+    setConnection('live', 'SSE 已连接');
   };
-  source.onerror = () => {
-    statusEl.textContent = 'SSE 重连中…';
-    statusEl.className = 'error';
+  current.onerror = () => {
+    if (source !== current) return;
+    current.close();
+    source = null;
+    setConnection('disconnected', 'SSE 已断开');
+    scheduleReconnect();
   };
-  source.onmessage = event => {
+  current.onmessage = event => {
+    if (source !== current) return;
+    reconnectDelay = 1000;
+    lastMessageAt = Date.now();
     try {
       appendSnapshot(JSON.parse(event.data));
-      renderAll();
+      scheduleRender();
     } catch (error) {
-      statusEl.textContent = `数据错误：${error.message}`;
-      statusEl.className = 'error';
+      lastUpdateEl.textContent = `数据错误：${error.message}`;
+      lastUpdateEl.className = 'alarm';
     }
   };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const wait = reconnectDelay;
+  reconnectDelay = Math.min(reconnectDelay * 2, reconnectMax);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectStream();
+  }, wait);
 }
 
 function appendPoint(target, value) {
@@ -158,8 +196,9 @@ function appendSnapshot(data) {
   appendPoint(series.temp.board, temps.board);
   appendPoint(series.current.battery, data.battery?.current_ma);
 
-  statusEl.textContent = `${new Date(data.generated_at).toLocaleTimeString()} · 最高温 ${data.max_temp_c ?? '—'} °C${data.watchdog_triggered ? ' · 温控介入' : ''}`;
-  statusEl.className = data.watchdog_triggered ? 'error' : 'live';
+  const updatedAt = new Date(data.generated_at).toLocaleTimeString();
+  lastUpdateEl.textContent = `最后更新 ${updatedAt} · 最高温 ${data.max_temp_c ?? '—'} °C${data.watchdog_triggered ? ' · 温控介入' : ''}`;
+  lastUpdateEl.className = data.watchdog_triggered ? 'alarm' : '';
 }
 
 function average(values) {
@@ -167,7 +206,8 @@ function average(values) {
   return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
 }
 
-function drawChart(canvas, groups, unit, fixedMin = null, fixedMax = null) {
+function drawChart(view, groups, unit, fixedMin = null, fixedMax = null) {
+  const {canvas, ctx} = view;
   const dpr = window.devicePixelRatio || 1;
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
@@ -176,7 +216,6 @@ function drawChart(canvas, groups, unit, fixedMin = null, fixedMax = null) {
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
   }
-  const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
@@ -239,11 +278,16 @@ function drawChart(canvas, groups, unit, fixedMin = null, fixedMax = null) {
   }
 }
 
+function chartView(selector) {
+  const canvas = document.querySelector(selector);
+  return {canvas, ctx: canvas.getContext('2d')};
+}
+
 const charts = {
-  cpu: document.querySelector('#cpu-chart'),
-  gpu: document.querySelector('#gpu-chart'),
-  temp: document.querySelector('#temp-chart'),
-  current: document.querySelector('#current-chart')
+  cpu: chartView('#cpu-chart'),
+  gpu: chartView('#gpu-chart'),
+  temp: chartView('#temp-chart'),
+  current: chartView('#current-chart')
 };
 
 function renderAll() {
@@ -253,7 +297,42 @@ function renderAll() {
   drawChart(charts.current, series.current, ' mA');
 }
 
-window.addEventListener('resize', renderAll);
+window.addEventListener('resize', scheduleRender);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const stale = lastMessageAt > 0 && Date.now() - lastMessageAt > 6000;
+  if (source && (source.readyState === EventSource.CLOSED || stale)) {
+    source.close();
+    source = null;
+    reconnectDelay = 1000;
+    setConnection('disconnected', 'SSE 已断开');
+    scheduleReconnect();
+    return;
+  }
+  if (!source && !reconnectTimer) {
+    reconnectDelay = 1000;
+    connectStream();
+  } else {
+    scheduleRender();
+  }
+});
+
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  const frame = timestamp => {
+    if (timestamp - lastRenderAt < 1000 / 30) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    renderScheduled = false;
+    lastRenderAt = timestamp;
+    renderAll();
+  };
+  requestAnimationFrame(frame);
+}
+
+connectStream();
 renderAll();
 </script>
 </body>

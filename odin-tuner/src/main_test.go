@@ -123,16 +123,65 @@ func TestTemperatureSummaryWhitelist(t *testing.T) {
 }
 
 func TestConfigClamp(t *testing.T) {
-	config := normalizeConfig(watchdogConfig{
+	config, err := normalizeConfig(watchdogConfig{
 		CPUThrottleTemp: 120,
 		GPUThrottleTemp: 90,
 		HardLimitTemp:   120,
+		WebAutostart:    true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if config.HardLimitTemp != 95 {
 		t.Fatalf("hard limit = %.1f", config.HardLimitTemp)
 	}
 	if config.CPUThrottleTemp != 95 || config.GPUThrottleTemp != 90 {
 		t.Fatalf("unexpected clamped config: %+v", config)
+	}
+	if config.AuthMode != "off" || !config.WebAutostart {
+		t.Fatalf("unexpected debug defaults: %+v", config)
+	}
+}
+
+func TestConfigDefaultsForExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"cpu_throttle_temp":83}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := &daemonState{configPath: path}
+	config, err := state.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.AuthMode != "off" {
+		t.Fatalf("auth mode = %q, want off", config.AuthMode)
+	}
+	if !config.WebAutostart {
+		t.Fatal("web_autostart should default to true")
+	}
+}
+
+func TestConfigAuthModes(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  watchdogConfig
+		wantErr bool
+	}{
+		{name: "empty defaults to off", config: watchdogConfig{}},
+		{name: "off", config: watchdogConfig{AuthMode: "off"}},
+		{name: "fixed", config: watchdogConfig{AuthMode: "fixed", FixedToken: "0123456789abcdef"}},
+		{name: "fixed too short", config: watchdogConfig{AuthMode: "fixed", FixedToken: "short"}, wantErr: true},
+		{name: "fixed unsafe", config: watchdogConfig{AuthMode: "fixed", FixedToken: "0123456789abcde/"}, wantErr: true},
+		{name: "random", config: watchdogConfig{AuthMode: "random"}},
+		{name: "invalid", config: watchdogConfig{AuthMode: "sometimes"}, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := normalizeConfig(test.config)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
 	}
 }
 
@@ -151,6 +200,37 @@ func TestWebTokenRequired(t *testing.T) {
 	handler.ServeHTTP(withToken, httptest.NewRequest(http.MethodGet, "/?token=secret", nil))
 	if withToken.Code != http.StatusNoContent {
 		t.Fatalf("with token status = %d", withToken.Code)
+	}
+}
+
+func TestWebAccessModes(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	tests := []struct {
+		name       string
+		mode       string
+		token      string
+		requestURL string
+		want       int
+	}{
+		{name: "off no token", mode: "off", requestURL: "/", want: http.StatusNoContent},
+		{name: "fixed no token", mode: "fixed", token: "0123456789abcdef", requestURL: "/", want: http.StatusUnauthorized},
+		{name: "fixed query token", mode: "fixed", token: "0123456789abcdef", requestURL: "/?token=0123456789abcdef", want: http.StatusNoContent},
+		{name: "random header token", mode: "random", token: "random-token-value", requestURL: "/", want: http.StatusNoContent},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.requestURL, nil)
+			if test.name == "random header token" {
+				request.Header.Set("X-ODIN-Token", test.token)
+			}
+			recorder := httptest.NewRecorder()
+			webAccessHandler(test.mode, test.token, next).ServeHTTP(recorder, request)
+			if recorder.Code != test.want {
+				t.Fatalf("status = %d, want %d", recorder.Code, test.want)
+			}
+		})
 	}
 }
 

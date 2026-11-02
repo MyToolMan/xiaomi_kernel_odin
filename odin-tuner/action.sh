@@ -1,3 +1,3 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
-exec "$MODDIR/bin/start-web.sh"
+exec "$MODDIR/bin/restart-web.sh"

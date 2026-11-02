@@ -116,6 +116,9 @@ type watchdogConfig struct {
 	CPUThrottleTemp float64 `json:"cpu_throttle_temp"`
 	GPUThrottleTemp float64 `json:"gpu_throttle_temp"`
 	HardLimitTemp   float64 `json:"hard_limit_temp"`
+	AuthMode        string  `json:"auth_mode"`
+	FixedToken      string  `json:"fixed_token"`
+	WebAutostart    bool    `json:"web_autostart"`
 }
 
 type paramSpec struct {
@@ -172,15 +175,17 @@ func main() {
 		runWeb(os.Args[2:])
 	case "restore-all":
 		runRestoreAll(os.Args[2:])
+	case "config-get":
+		runConfigGet(os.Args[2:])
 	case "version":
-		fmt.Println("odin-tuner v0.1.0")
+		fmt.Println("odin-tuner v0.2.1")
 	default:
 		usage()
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: odin-tuner {daemon|web|restore-all|version} [options]")
+	fmt.Fprintln(os.Stderr, "usage: odin-tuner {daemon|web|restore-all|config-get|version} [options]")
 	os.Exit(2)
 }
 
@@ -243,6 +248,7 @@ func runWeb(args []string) {
 	socketPath := flags.String("socket", "", "daemon Unix socket")
 	apiURL := flags.String("api-url", "", "optional daemon HTTP URL for verification")
 	listen := flags.String("listen", "127.0.0.1:8787", "HTTP listen address")
+	authMode := flags.String("auth-mode", "off", "off, fixed, or random")
 	tokenFile := flags.String("token-file", "", "file containing the web access token")
 	root := flags.String("root", "", "webui directory")
 	flags.Parse(args)
@@ -256,9 +262,16 @@ func runWeb(args []string) {
 	if *tokenFile == "" {
 		*tokenFile = filepath.Join(*dataDir, "web_token")
 	}
-	token, err := readString(*tokenFile)
-	if err != nil || token == "" {
-		log.Fatalf("read web token %s: %v", *tokenFile, err)
+	if *authMode != "off" && *authMode != "fixed" && *authMode != "random" {
+		log.Fatalf("invalid auth mode %q", *authMode)
+	}
+	token := ""
+	if *authMode != "off" {
+		var err error
+		token, err = readString(*tokenFile)
+		if err != nil || token == "" {
+			log.Fatalf("read web token %s: %v", *tokenFile, err)
+		}
 	}
 
 	client := unixHTTPClient(*socketPath)
@@ -311,8 +324,12 @@ func runWeb(args []string) {
 
 	server := &http.Server{
 		Addr:              *listen,
-		Handler:           requireWebToken(token, mux),
+		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+	server.Handler = webAccessHandler(*authMode, token, mux)
+	if *authMode == "off" {
+		log.Printf("WARNING: 鉴权已关闭，仅限可信网络")
 	}
 	log.Printf("web UI listening on http://%s", *listen)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -336,6 +353,39 @@ func runRestoreAll(args []string) {
 	fmt.Println(string(body))
 	if response.StatusCode != http.StatusOK {
 		os.Exit(1)
+	}
+}
+
+func runConfigGet(args []string) {
+	flags := flag.NewFlagSet("config-get", flag.ExitOnError)
+	configPath := flags.String("config", filepath.Join(defaultDataDir, "config.json"), "configuration path")
+	field := flags.String("field", "auth_mode", "configuration field")
+	flags.Parse(args)
+
+	if err := ensureConfigFile(*configPath); err != nil {
+		log.Fatal(err)
+	}
+	state := &daemonState{configPath: *configPath}
+	config, err := state.loadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	switch *field {
+	case "auth_mode":
+		fmt.Println(config.AuthMode)
+	case "fixed_token":
+		fmt.Println(config.FixedToken)
+	case "web_autostart":
+		fmt.Println(strconv.FormatBool(config.WebAutostart))
+	case "cpu_throttle_temp":
+		fmt.Println(strconv.FormatFloat(config.CPUThrottleTemp, 'f', -1, 64))
+	case "gpu_throttle_temp":
+		fmt.Println(strconv.FormatFloat(config.GPUThrottleTemp, 'f', -1, 64))
+	case "hard_limit_temp":
+		fmt.Println(strconv.FormatFloat(config.HardLimitTemp, 'f', -1, 64))
+	default:
+		fmt.Fprintf(os.Stderr, "unknown config field %q\n", *field)
+		os.Exit(2)
 	}
 }
 
@@ -425,18 +475,29 @@ func defaultWatchdogConfig() watchdogConfig {
 		CPUThrottleTemp: defaultCPUTemp,
 		GPUThrottleTemp: defaultGPUTemp,
 		HardLimitTemp:   defaultHardTemp,
+		AuthMode:        "off",
+		FixedToken:      "",
+		WebAutostart:    true,
 	}
 }
 
 func (s *daemonState) ensureConfig() error {
-	if _, err := os.Stat(s.configPath); err == nil {
-		_, loadErr := s.loadConfig()
+	return ensureConfigFile(s.configPath)
+}
+
+func ensureConfigFile(configPath string) error {
+	if _, err := os.Stat(configPath); err == nil {
+		state := &daemonState{configPath: configPath}
+		_, loadErr := state.loadConfig()
 		return loadErr
 	} else if !os.IsNotExist(err) {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		return err
+	}
 	data, _ := json.MarshalIndent(defaultWatchdogConfig(), "", "  ")
-	return os.WriteFile(s.configPath, append(data, '\n'), 0o600)
+	return os.WriteFile(configPath, append(data, '\n'), 0o600)
 }
 
 func (s *daemonState) loadConfig() (watchdogConfig, error) {
@@ -448,10 +509,10 @@ func (s *daemonState) loadConfig() (watchdogConfig, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return defaultWatchdogConfig(), fmt.Errorf("parse config: %w", err)
 	}
-	return normalizeConfig(config), nil
+	return normalizeConfig(config)
 }
 
-func normalizeConfig(config watchdogConfig) watchdogConfig {
+func normalizeConfig(config watchdogConfig) (watchdogConfig, error) {
 	defaults := defaultWatchdogConfig()
 	if config.HardLimitTemp == 0 {
 		config.HardLimitTemp = defaults.HardLimitTemp
@@ -466,7 +527,35 @@ func normalizeConfig(config watchdogConfig) watchdogConfig {
 	}
 	config.CPUThrottleTemp = clampFloat(config.CPUThrottleTemp, minimumWatchTemp, config.HardLimitTemp)
 	config.GPUThrottleTemp = clampFloat(config.GPUThrottleTemp, minimumWatchTemp, config.HardLimitTemp)
-	return config
+
+	switch config.AuthMode {
+	case "", "off":
+		config.AuthMode = "off"
+	case "fixed":
+		if !isURLSafeToken(config.FixedToken, 16) {
+			return config, errors.New("fixed_token must be at least 16 characters and URL-safe")
+		}
+	case "random":
+	default:
+		return config, fmt.Errorf("invalid auth_mode %q", config.AuthMode)
+	}
+	return config, nil
+}
+
+func isURLSafeToken(token string, minimumLength int) bool {
+	if len(token) < minimumLength {
+		return false
+	}
+	for _, character := range []byte(token) {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '-' || character == '.' || character == '_' || character == '~' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func clampFloat(value, minimum, maximum float64) float64 {
@@ -863,7 +952,7 @@ func (s *daemonState) handleStream(w http.ResponseWriter, r *http.Request) {
 			writeSSE(w, snap)
 			flusher.Flush()
 		case <-heartbeat.C:
-			_, _ = io.WriteString(w, ": keepalive\n\n")
+			_, _ = io.WriteString(w, ": heartbeat\n\n")
 			flusher.Flush()
 		}
 	}
@@ -1290,6 +1379,13 @@ func requireWebToken(expected string, next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func webAccessHandler(authMode, token string, next http.Handler) http.Handler {
+	if authMode == "off" {
+		return next
+	}
+	return requireWebToken(token, next)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

@@ -25,7 +25,7 @@
   <h1>ODIN Tuner</h1>
   <div class="muted">SukiSU WebUI · 只读快照</div>
   <div id="status" class="status">正在读取 daemon 快照…</div>
-  <button id="start-web" type="button">启动浏览器服务</button>
+  <button id="start-web" type="button">重启 Web 服务</button>
   <button id="stop-web" class="secondary" type="button">停止浏览器服务</button>
   <div id="web-status" class="status">浏览器服务未启动</div>
   <h2>CPU</h2>
@@ -88,10 +88,10 @@ startWebEl.addEventListener('click', async () => {
   startWebEl.disabled = true;
   webStatusEl.textContent = '正在启动…';
   try {
-    const output = await exec('/data/adb/modules/odin-tuner/bin/start-web.sh');
-    webStatusEl.textContent = output.trim() || '浏览器服务已启动：http://127.0.0.1:8787';
+    const output = await exec('/data/adb/modules/odin-tuner/bin/restart-web.sh');
+    webStatusEl.textContent = output.trim() || 'Web 服务已重启：http://127.0.0.1:8787';
   } catch (error) {
-    webStatusEl.textContent = `启动失败：${error.message}`;
+    webStatusEl.textContent = `重启失败：${error.message}`;
   } finally {
     startWebEl.disabled = false;
   }

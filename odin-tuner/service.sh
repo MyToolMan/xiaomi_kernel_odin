@@ -7,6 +7,13 @@ PID_FILE="$DATA_DIR/daemon.pid"
 SOCKET="$DATA_DIR/odin-tuner.sock"
 BIN="$MODDIR/bin/odin-tuner"
 
+start_web_if_configured() {
+  web_autostart=$("$BIN" config-get --config "$DATA_DIR/config.json" --field web_autostart 2>/dev/null || echo false)
+  if [ "$web_autostart" = "true" ]; then
+    "$MODDIR/bin/start-web.sh" >> "$LOG_FILE" 2>&1 || true
+  fi
+}
+
 mkdir -p "$DATA_DIR/backup" "$LOG_DIR"
 chmod 700 "$DATA_DIR" "$DATA_DIR/backup" "$LOG_DIR"
 if [ ! -f "$DATA_DIR/config.json" ]; then
@@ -19,6 +26,7 @@ if [ -s "$PID_FILE" ]; then
   if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null &&
      grep -q odin-tuner "/proc/$old_pid/cmdline" 2>/dev/null; then
     echo "odin-tuner already running: pid=$old_pid"
+    start_web_if_configured
     exit 0
   fi
 fi
@@ -61,6 +69,7 @@ while [ "$i" -lt 20 ]; do
     chown 0:2000 "$SOCKET" 2>/dev/null || true
     chmod 660 "$SOCKET"
     echo "odin-tuner ready: pid=$pid socket=$SOCKET"
+    start_web_if_configured
     exit 0
   fi
   if ! kill -0 "$pid" 2>/dev/null; then
