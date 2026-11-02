@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -26,8 +27,12 @@ import (
 
 const (
 	defaultDataDir   = "/data/adb/odin-tuner"
-	watchdogTempC    = 80.0
-	watchdogRearmC   = 75.0
+	defaultCPUTemp   = 85.0
+	defaultGPUTemp   = 85.0
+	defaultHardTemp  = 95.0
+	minimumWatchTemp = 60.0
+	maximumHardTemp  = 95.0
+	watchdogRearmGap = 5.0
 	collectionPeriod = 2 * time.Second
 )
 
@@ -61,6 +66,10 @@ type gpuReading struct {
 	Governor   string `json:"governor,omitempty"`
 }
 
+type batteryReading struct {
+	CurrentMA int64 `json:"current_ma"`
+}
+
 type thermalReading struct {
 	Zone  string   `json:"zone"`
 	Type  string   `json:"type"`
@@ -68,21 +77,45 @@ type thermalReading struct {
 	Mode  string   `json:"mode,omitempty"`
 }
 
+type thermalSummary struct {
+	CPULittle *float64 `json:"cpu_little"`
+	CPUMid    *float64 `json:"cpu_mid"`
+	CPUPrime  *float64 `json:"cpu_prime"`
+	GPU       *float64 `json:"gpu"`
+	Battery   *float64 `json:"battery"`
+	Board     *float64 `json:"board"`
+	Memory    *float64 `json:"memory"`
+}
+
 type snapshot struct {
 	GeneratedAt       string             `json:"generated_at"`
 	CPU               []cpuReading       `json:"cpu"`
 	GPU               *gpuReading        `json:"gpu"`
 	GPUError          string             `json:"gpu_error,omitempty"`
-	Thermal           []thermalReading   `json:"thermal"`
+	Battery           *batteryReading    `json:"battery,omitempty"`
+	Thermal           []thermalReading   `json:"-"`
+	ThermalSummary    *thermalSummary    `json:"thermal_summary"`
 	MaxTempC          *float64           `json:"max_temp_c"`
 	WatchdogTriggered bool               `json:"watchdog_triggered"`
+	ConfigError       string             `json:"config_error,omitempty"`
 	LastEvent         *watchdogEventInfo `json:"last_event,omitempty"`
 }
 
 type watchdogEventInfo struct {
-	Time   string `json:"time"`
-	Type   string `json:"type"`
-	Detail string `json:"detail"`
+	Time         string  `json:"time"`
+	Type         string  `json:"type"`
+	Sensor       string  `json:"sensor"`
+	TemperatureC float64 `json:"temperature_c"`
+	Param        string  `json:"param,omitempty"`
+	Before       int64   `json:"before_freq,omitempty"`
+	After        int64   `json:"after_freq,omitempty"`
+	Detail       string  `json:"detail,omitempty"`
+}
+
+type watchdogConfig struct {
+	CPUThrottleTemp float64 `json:"cpu_throttle_temp"`
+	GPUThrottleTemp float64 `json:"gpu_throttle_temp"`
+	HardLimitTemp   float64 `json:"hard_limit_temp"`
 }
 
 type paramSpec struct {
@@ -108,11 +141,18 @@ type daemonState struct {
 	backupDir    string
 	eventsPath   string
 	snapshotPath string
+	configPath   string
 
-	writeMu sync.Mutex
-	specs   map[string]paramSpec
-	latest  atomic.Value
-	hot     bool
+	writeMu     sync.Mutex
+	configMu    sync.RWMutex
+	config      watchdogConfig
+	subMu       sync.Mutex
+	specs       map[string]paramSpec
+	subscribers map[chan snapshot]struct{}
+	latest      atomic.Value
+	cpuHot      bool
+	gpuHot      bool
+	hardHot     bool
 }
 
 type setRequest struct {
@@ -203,6 +243,7 @@ func runWeb(args []string) {
 	socketPath := flags.String("socket", "", "daemon Unix socket")
 	apiURL := flags.String("api-url", "", "optional daemon HTTP URL for verification")
 	listen := flags.String("listen", "127.0.0.1:8787", "HTTP listen address")
+	tokenFile := flags.String("token-file", "", "file containing the web access token")
 	root := flags.String("root", "", "webui directory")
 	flags.Parse(args)
 
@@ -211,6 +252,13 @@ func runWeb(args []string) {
 	}
 	if *root == "" {
 		*root = "webui"
+	}
+	if *tokenFile == "" {
+		*tokenFile = filepath.Join(*dataDir, "web_token")
+	}
+	token, err := readString(*tokenFile)
+	if err != nil || token == "" {
+		log.Fatalf("read web token %s: %v", *tokenFile, err)
 	}
 
 	client := unixHTTPClient(*socketPath)
@@ -221,10 +269,6 @@ func runWeb(args []string) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/snapshot", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 		response, err := client.Get(target + "/snapshot")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
@@ -235,11 +279,39 @@ func runWeb(args []string) {
 		w.WriteHeader(response.StatusCode)
 		_, _ = io.Copy(w, response.Body)
 	})
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		response, err := client.Get(target + "/stream")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer response.Body.Close()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(response.StatusCode)
+		flusher, _ := w.(http.Flusher)
+		buffer := make([]byte, 32<<10)
+		for {
+			n, readErr := response.Body.Read(buffer)
+			if n > 0 {
+				if _, err := w.Write(buffer[:n]); err != nil {
+					return
+				}
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	})
 	mux.Handle("/", http.FileServer(http.Dir(*root)))
 
 	server := &http.Server{
 		Addr:              *listen,
-		Handler:           mux,
+		Handler:           requireWebToken(token, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	log.Printf("web UI listening on http://%s", *listen)
@@ -275,7 +347,10 @@ func newDaemonState(dataDir, moduleDir, socketPath string) (*daemonState, error)
 		backupDir:    filepath.Join(dataDir, "backup"),
 		eventsPath:   filepath.Join(dataDir, "events.jsonl"),
 		snapshotPath: filepath.Join(dataDir, "snapshot.json"),
+		configPath:   filepath.Join(dataDir, "config.json"),
+		config:       defaultWatchdogConfig(),
 		specs:        make(map[string]paramSpec),
+		subscribers:  make(map[chan snapshot]struct{}),
 	}
 	for _, dir := range []string{state.dataDir, state.backupDir, filepath.Join(state.dataDir, "logs")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -283,6 +358,9 @@ func newDaemonState(dataDir, moduleDir, socketPath string) (*daemonState, error)
 		}
 	}
 	_ = os.Remove(socketPath)
+	if err := state.ensureConfig(); err != nil {
+		return nil, err
+	}
 	state.discoverSpecs()
 	return state, nil
 }
@@ -342,6 +420,71 @@ func (s *daemonState) discoverSpecs() {
 	log.Printf("discovered %d writable parameter specs", len(s.specs))
 }
 
+func defaultWatchdogConfig() watchdogConfig {
+	return watchdogConfig{
+		CPUThrottleTemp: defaultCPUTemp,
+		GPUThrottleTemp: defaultGPUTemp,
+		HardLimitTemp:   defaultHardTemp,
+	}
+}
+
+func (s *daemonState) ensureConfig() error {
+	if _, err := os.Stat(s.configPath); err == nil {
+		_, loadErr := s.loadConfig()
+		return loadErr
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	data, _ := json.MarshalIndent(defaultWatchdogConfig(), "", "  ")
+	return os.WriteFile(s.configPath, append(data, '\n'), 0o600)
+}
+
+func (s *daemonState) loadConfig() (watchdogConfig, error) {
+	data, err := os.ReadFile(s.configPath)
+	if err != nil {
+		return defaultWatchdogConfig(), err
+	}
+	config := defaultWatchdogConfig()
+	if err := json.Unmarshal(data, &config); err != nil {
+		return defaultWatchdogConfig(), fmt.Errorf("parse config: %w", err)
+	}
+	return normalizeConfig(config), nil
+}
+
+func normalizeConfig(config watchdogConfig) watchdogConfig {
+	defaults := defaultWatchdogConfig()
+	if config.HardLimitTemp == 0 {
+		config.HardLimitTemp = defaults.HardLimitTemp
+	}
+	config.HardLimitTemp = clampFloat(config.HardLimitTemp, minimumWatchTemp, maximumHardTemp)
+
+	if config.CPUThrottleTemp == 0 {
+		config.CPUThrottleTemp = defaults.CPUThrottleTemp
+	}
+	if config.GPUThrottleTemp == 0 {
+		config.GPUThrottleTemp = defaults.GPUThrottleTemp
+	}
+	config.CPUThrottleTemp = clampFloat(config.CPUThrottleTemp, minimumWatchTemp, config.HardLimitTemp)
+	config.GPUThrottleTemp = clampFloat(config.GPUThrottleTemp, minimumWatchTemp, config.HardLimitTemp)
+	return config
+}
+
+func clampFloat(value, minimum, maximum float64) float64 {
+	if value < minimum {
+		return minimum
+	}
+	if value > maximum {
+		return maximum
+	}
+	return value
+}
+
+func (s *daemonState) currentConfig() watchdogConfig {
+	s.configMu.RLock()
+	defer s.configMu.RUnlock()
+	return s.config
+}
+
 func (s *daemonState) collectLoop(ctx context.Context) {
 	ticker := time.NewTicker(collectionPeriod)
 	defer ticker.Stop()
@@ -362,25 +505,82 @@ func (s *daemonState) collectOnce() {
 		Thermal:     readThermal(),
 	}
 	snap.GPU, snap.GPUError = readGPU()
+	snap.Battery = readBattery()
+	snap.ThermalSummary = summarizeThermal(snap.Thermal)
 	snap.MaxTempC = maxTemperature(snap.Thermal)
-	snap.WatchdogTriggered = s.hot
+	config, configErr := s.loadConfig()
+	if configErr != nil {
+		snap.ConfigError = configErr.Error()
+	} else {
+		s.configMu.Lock()
+		s.config = config
+		s.configMu.Unlock()
+	}
+	activeConfig := s.currentConfig()
+	snap.WatchdogTriggered = s.cpuHot || s.gpuHot || s.hardHot
 	snap.LastEvent = s.lastEvent()
 
-	if snap.MaxTempC != nil && *snap.MaxTempC >= watchdogTempC && !s.hot {
-		s.hot = true
-		snap.WatchdogTriggered = true
-		s.enforceSafeCaps(*snap.MaxTempC)
-		snap.LastEvent = s.lastEvent()
-	} else if snap.MaxTempC != nil && *snap.MaxTempC < watchdogRearmC && s.hot {
-		s.hot = false
-		snap.WatchdogTriggered = false
-		s.recordEvent("watchdog_rearm", fmt.Sprintf("temperature %.1f C below rearm threshold", *snap.MaxTempC))
+	cpuTemp, cpuSensor := maxThermalValue(
+		snap.ThermalSummary.CPULittle,
+		snap.ThermalSummary.CPUMid,
+		snap.ThermalSummary.CPUPrime,
+	)
+	gpuTemp := derefFloat(snap.ThermalSummary.GPU)
+	anyTemp := summaryMaximum(snap.ThermalSummary)
+
+	if anyTemp != nil && *anyTemp >= activeConfig.HardLimitTemp {
+		if !s.hardHot {
+			s.hardHot = true
+			s.applySafeCaps("hard_limit", "thermal_summary_max", *anyTemp, []string{
+				"cpu_little_max_freq", "cpu_big_max_freq", "cpu_prime_max_freq", "gpu_max_freq",
+			})
+		}
+	} else if anyTemp != nil && *anyTemp < activeConfig.HardLimitTemp-watchdogRearmGap {
+		s.hardHot = false
 	}
-	s.latest.Store(snap)
-	if data, err := json.Marshal(snap); err == nil {
+
+	if cpuTemp != nil && *cpuTemp >= activeConfig.CPUThrottleTemp {
+		if !s.cpuHot {
+			s.cpuHot = true
+			s.applySafeCaps("cpu_throttle", cpuSensor, *cpuTemp, []string{
+				"cpu_little_max_freq", "cpu_big_max_freq", "cpu_prime_max_freq",
+			})
+		}
+	} else if cpuTemp != nil && *cpuTemp < activeConfig.CPUThrottleTemp-watchdogRearmGap {
+		s.cpuHot = false
+	}
+
+	if gpuTemp != nil && *gpuTemp >= activeConfig.GPUThrottleTemp {
+		if !s.gpuHot {
+			s.gpuHot = true
+			s.applySafeCaps("gpu_throttle", "gpu", *gpuTemp, []string{"gpu_max_freq"})
+		}
+	} else if gpuTemp != nil && *gpuTemp < activeConfig.GPUThrottleTemp-watchdogRearmGap {
+		s.gpuHot = false
+	}
+
+	snap.WatchdogTriggered = s.cpuHot || s.gpuHot || s.hardHot
+	snap.LastEvent = s.lastEvent()
+
+	data, err := json.Marshal(snap)
+	if err == nil {
 		tmp := s.snapshotPath + ".tmp"
 		if os.WriteFile(tmp, append(data, '\n'), 0o600) == nil {
 			_ = os.Rename(tmp, s.snapshotPath)
+		}
+	}
+	s.latest.Store(snap)
+	s.broadcast(snap)
+}
+
+func (s *daemonState) broadcast(snap snapshot) {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	for subscriber := range s.subscribers {
+		select {
+		case subscriber <- snap:
+		default:
+			// A slow browser must not block collection or other subscribers.
 		}
 	}
 }
@@ -430,6 +630,14 @@ func readGPU() (*gpuReading, string) {
 	}, ""
 }
 
+func readBattery() *batteryReading {
+	microamps, err := readInt("/sys/class/power_supply/battery/current_now")
+	if err != nil {
+		return nil
+	}
+	return &batteryReading{CurrentMA: microamps / 1000}
+}
+
 func readThermal() []thermalReading {
 	paths, _ := filepath.Glob("/sys/class/thermal/thermal_zone*")
 	sort.Slice(paths, func(i, j int) bool {
@@ -458,6 +666,97 @@ func readThermal() []thermalReading {
 	return result
 }
 
+func summarizeThermal(zones []thermalReading) *thermalSummary {
+	summary := &thermalSummary{}
+	for _, zone := range zones {
+		if zone.TempC == nil || *zone.TempC <= -40 || zone.Mode == "disabled" {
+			continue
+		}
+		value := *zone.TempC
+		switch {
+		case strings.HasPrefix(zone.Type, "cpu-0-") &&
+			(strings.HasSuffix(zone.Type, "-step") || strings.HasSuffix(zone.Type, "-usr")):
+			setMaximum(&summary.CPULittle, value)
+		case strings.HasPrefix(zone.Type, "cpu-1-") &&
+			(strings.HasSuffix(zone.Type, "-step") || strings.HasSuffix(zone.Type, "-usr")):
+			index := cpuClusterSensorIndex(zone.Type)
+			if index <= 3 {
+				setMaximum(&summary.CPUMid, value)
+			} else {
+				setMaximum(&summary.CPUPrime, value)
+			}
+		case zone.Type == "gpuss-0-step" || zone.Type == "gpuss-1-step":
+			setMaximum(&summary.GPU, value)
+		case zone.Type == "battery":
+			setMaximum(&summary.Battery, value)
+		case zone.Type == "xo_therm" || zone.Type == "quiet_therm":
+			setMaximum(&summary.Board, value)
+		case zone.Type == "ddr-usr":
+			setMaximum(&summary.Memory, value)
+		}
+	}
+	return summary
+}
+
+func cpuClusterSensorIndex(zoneType string) int {
+	parts := strings.Split(zoneType, "-")
+	if len(parts) < 3 {
+		return 99
+	}
+	index, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 99
+	}
+	return index
+}
+
+func setMaximum(target **float64, value float64) {
+	if *target == nil || value > **target {
+		copied := value
+		*target = &copied
+	}
+}
+
+func derefFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
+func maxThermalValue(values ...*float64) (*float64, string) {
+	names := []string{"cpu_little", "cpu_mid", "cpu_prime"}
+	var maximum *float64
+	sensor := "cpu"
+	for index, value := range values {
+		if value != nil && (maximum == nil || *value > *maximum) {
+			copied := *value
+			maximum = &copied
+			sensor = names[index]
+		}
+	}
+	return maximum, sensor
+}
+
+func summaryMaximum(summary *thermalSummary) *float64 {
+	if summary == nil {
+		return nil
+	}
+	values := []*float64{
+		summary.CPULittle, summary.CPUMid, summary.CPUPrime,
+		summary.GPU, summary.Battery, summary.Board, summary.Memory,
+	}
+	var maximum *float64
+	for _, value := range values {
+		if value != nil && (maximum == nil || *value > *maximum) {
+			copied := *value
+			maximum = &copied
+		}
+	}
+	return maximum
+}
+
 func maxTemperature(zones []thermalReading) *float64 {
 	var maximum *float64
 	for _, zone := range zones {
@@ -472,36 +771,31 @@ func maxTemperature(zones []thermalReading) *float64 {
 	return maximum
 }
 
-func (s *daemonState) enforceSafeCaps(temperature float64) {
+func (s *daemonState) applySafeCaps(eventType, sensor string, temperature float64, params []string) {
 	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	names := make([]string, 0, len(s.specs))
-	for name := range s.specs {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	details := make([]string, 0, len(names))
-	for _, name := range names {
+	for _, name := range params {
 		spec := s.specs[name]
 		if spec.SafeValue == 0 {
 			continue
 		}
-		current, err := readInt(spec.Path)
+		before, err := readInt(spec.Path)
 		if err != nil {
-			details = append(details, fmt.Sprintf("%s unavailable", name))
+			s.recordEvent(eventType, sensor, temperature, name, 0, 0, "node unavailable")
 			continue
 		}
-		if current <= spec.SafeValue {
-			continue
+		after := before
+		detail := "already at or below safety cap"
+		if before > spec.SafeValue {
+			if _, err := s.setParamLocked(spec, spec.SafeValue); err != nil {
+				detail = "cap failed: " + err.Error()
+			} else {
+				after = spec.SafeValue
+				detail = "frequency capped"
+			}
 		}
-		if _, err := s.setParamLocked(spec, spec.SafeValue); err != nil {
-			details = append(details, fmt.Sprintf("%s failed: %v", name, err))
-		} else {
-			details = append(details, fmt.Sprintf("%s capped to %d", name, spec.SafeValue))
-		}
+		s.recordEvent(eventType, sensor, temperature, name, before, after, detail)
 	}
-	s.recordEvent("thermal_cap", fmt.Sprintf("temperature %.1f C; %s", temperature, strings.Join(details, "; ")))
+	s.writeMu.Unlock()
 }
 
 func (s *daemonState) newUnixServer() *http.Server {
@@ -521,11 +815,66 @@ func (s *daemonState) newUnixServer() *http.Server {
 	})
 	mux.HandleFunc("/set", s.handleSet)
 	mux.HandleFunc("/restore", s.handleRestore)
+	mux.HandleFunc("/stream", s.handleStream)
 
 	return &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func (s *daemonState) handleStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	subscriber := make(chan snapshot, 1)
+	s.subMu.Lock()
+	s.subscribers[subscriber] = struct{}{}
+	s.subMu.Unlock()
+	defer func() {
+		s.subMu.Lock()
+		delete(s.subscribers, subscriber)
+		s.subMu.Unlock()
+	}()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	_, _ = io.WriteString(w, "retry: 2000\n\n")
+	if value := s.latest.Load(); value != nil {
+		writeSSE(w, value.(snapshot))
+		flusher.Flush()
+	}
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case snap := <-subscriber:
+			writeSSE(w, snap)
+			flusher.Flush()
+		case <-heartbeat.C:
+			_, _ = io.WriteString(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func writeSSE(w io.Writer, snap snapshot) {
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
 }
 
 func (s *daemonState) startUnixListener() (net.Listener, error) {
@@ -771,11 +1120,24 @@ func writeVerified(path, value, expected string) error {
 	return nil
 }
 
-func (s *daemonState) recordEvent(eventType, detail string) {
+func (s *daemonState) recordEvent(
+	eventType string,
+	sensor string,
+	temperature float64,
+	param string,
+	before int64,
+	after int64,
+	detail string,
+) {
 	event := watchdogEventInfo{
-		Time:   time.Now().Format(time.RFC3339),
-		Type:   eventType,
-		Detail: detail,
+		Time:         time.Now().Format(time.RFC3339),
+		Type:         eventType,
+		Sensor:       sensor,
+		TemperatureC: temperature,
+		Param:        param,
+		Before:       before,
+		After:        after,
+		Detail:       detail,
 	}
 	data, _ := json.Marshal(event)
 	file, err := os.OpenFile(s.eventsPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
@@ -906,7 +1268,28 @@ func unixHTTPClient(socketPath string) *http.Client {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
 		},
 	}
-	return &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	return &http.Client{Transport: transport}
+}
+
+func requireWebToken(expected string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		provided := r.URL.Query().Get("token")
+		if provided == "" {
+			provided = r.Header.Get("X-ODIN-Token")
+		}
+		if provided == "" {
+			authorization := r.Header.Get("Authorization")
+			if strings.HasPrefix(authorization, "Bearer ") {
+				provided = strings.TrimPrefix(authorization, "Bearer ")
+			}
+		}
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+			http.Error(w, "401 unauthorized: missing or invalid token", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

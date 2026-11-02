@@ -3,86 +3,258 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ODIN Tuner</title>
+  <title>ODIN Tuner · Live</title>
   <style>
-    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
-    body { margin: 0; padding: 24px; background: #111318; color: #eef1f7; }
-    main { max-width: 760px; margin: auto; }
-    h1 { margin: 0 0 6px; font-size: 28px; }
-    .muted { color: #9da6b8; }
-    .status { margin: 18px 0; padding: 14px; border-radius: 14px; background: #1c2029; }
-    .error { color: #ff9d9d; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; overflow: hidden; border-radius: 12px; }
-    th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid #303542; }
-    th { background: #202530; color: #b9c2d4; font-weight: 600; }
-    code { color: #93d7ff; }
+    :root {
+      color-scheme: dark;
+      --bg: #0c1018;
+      --panel: #151c28;
+      --panel-edge: #273349;
+      --text: #edf4ff;
+      --muted: #91a0b8;
+      --grid: #263246;
+      --little: #65d49a;
+      --mid: #72a8ff;
+      --prime: #ffbf69;
+      --gpu: #e78cff;
+      --battery: #ff7d87;
+      --board: #68d8ed;
+      --memory: #b6c4d8;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-width: 1280px; min-height: 720px; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow: hidden;
+      background: radial-gradient(circle at 20% -10%, #1b2c46 0, var(--bg) 42%);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+    }
+    main { height: 100vh; padding: 22px 26px 26px; display: flex; flex-direction: column; gap: 16px; }
+    header { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
+    h1 { margin: 0; font-size: 34px; letter-spacing: -0.02em; }
+    .subtitle { color: var(--muted); font-size: 17px; }
+    #status { padding: 8px 13px; border: 1px solid var(--panel-edge); border-radius: 999px; color: var(--muted); font-size: 15px; }
+    #status.live { color: var(--little); }
+    #status.error { color: var(--battery); }
+    .grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; }
+    .card { min-height: 0; display: flex; flex-direction: column; padding: 16px 18px 12px; border: 1px solid var(--panel-edge); border-radius: 18px; background: linear-gradient(180deg, rgba(29,39,56,.96), rgba(17,23,34,.96)); box-shadow: 0 14px 35px rgba(0,0,0,.22); }
+    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 8px; }
+    h2 { margin: 0; font-size: 22px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 14px; }
+    .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: currentColor; }
+    canvas { width: 100%; min-height: 0; flex: 1; }
+    .c-little { color: var(--little); } .c-mid { color: var(--mid); } .c-prime { color: var(--prime); }
+    .c-gpu { color: var(--gpu); } .c-battery { color: var(--battery); } .c-board { color: var(--board); }
+    .c-memory { color: var(--memory); }
+    @media (max-width: 1400px) {
+      html, body { min-width: 1024px; min-height: 640px; }
+      h1 { font-size: 28px; } h2 { font-size: 19px; }
+    }
   </style>
 </head>
 <body>
 <main>
-  <h1>ODIN Tuner</h1>
-  <div class="muted">只读快照 · 每 2 秒刷新</div>
-  <div id="status" class="status">正在连接 daemon…</div>
-  <section>
-    <h2>CPU</h2>
-    <table><thead><tr><th>CPU</th><th>当前 MHz</th><th>上限 MHz</th><th>Governor</th></tr></thead><tbody id="cpu"></tbody></table>
-  </section>
-  <section>
-    <h2>GPU</h2>
-    <div id="gpu" class="status">无数据</div>
-  </section>
-  <section>
-    <h2>温度最高的节点</h2>
-    <table><thead><tr><th>Zone</th><th>Type</th><th>温度</th></tr></thead><tbody id="temps"></tbody></table>
-  </section>
+  <header>
+    <div>
+      <h1>ODIN Tuner</h1>
+      <div class="subtitle">MIX4 · 实时只读性能快照 · SSE</div>
+    </div>
+    <div id="status">正在连接 daemon…</div>
+  </header>
+  <div class="grid">
+    <section class="card">
+      <div class="card-head">
+        <h2>CPU 频率</h2>
+        <div class="legend"><span class="c-little">little</span><span class="c-mid">mid</span><span class="c-prime">prime</span></div>
+      </div>
+      <canvas id="cpu-chart" aria-label="CPU frequency chart"></canvas>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>GPU 频率</h2>
+        <div class="legend"><span class="c-gpu">GPU MHz</span></div>
+      </div>
+      <canvas id="gpu-chart" aria-label="GPU frequency chart"></canvas>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>温度</h2>
+        <div class="legend"><span class="c-little">little</span><span class="c-mid">mid</span><span class="c-prime">prime</span><span class="c-gpu">GPU</span><span class="c-battery">电池</span><span class="c-board">主板</span></div>
+      </div>
+      <canvas id="temp-chart" aria-label="Temperature chart"></canvas>
+    </section>
+    <section class="card">
+      <div class="card-head">
+        <h2>电池电流</h2>
+        <div class="legend"><span class="c-battery">mA</span></div>
+      </div>
+      <canvas id="current-chart" aria-label="Battery current chart"></canvas>
+    </section>
+  </div>
 </main>
 <script>
 const statusEl = document.querySelector('#status');
-const cpuEl = document.querySelector('#cpu');
-const gpuEl = document.querySelector('#gpu');
-const tempsEl = document.querySelector('#temps');
+const token = new URLSearchParams(location.search).get('token');
+const maxPoints = 240;
+let sequence = 0;
+const colors = {
+  little: '#65d49a', mid: '#72a8ff', prime: '#ffbf69',
+  gpu: '#e78cff', battery: '#ff7d87', board: '#68d8ed', memory: '#b6c4d8'
+};
+const series = {
+  cpu: {little: [], mid: [], prime: []},
+  gpu: {gpu: []},
+  temp: {little: [], mid: [], prime: [], gpu: [], battery: [], board: []},
+  current: {battery: []}
+};
 
-function cell(value) {
-  const td = document.createElement('td');
-  td.textContent = value ?? '—';
-  return td;
+if (!token) {
+  statusEl.textContent = '缺少访问 token';
+  statusEl.className = 'error';
+} else {
+  const source = new EventSource(`/stream?token=${encodeURIComponent(token)}`);
+  source.onopen = () => {
+    statusEl.textContent = 'SSE 已连接';
+    statusEl.className = 'live';
+  };
+  source.onerror = () => {
+    statusEl.textContent = 'SSE 重连中…';
+    statusEl.className = 'error';
+  };
+  source.onmessage = event => {
+    try {
+      appendSnapshot(JSON.parse(event.data));
+      renderAll();
+    } catch (error) {
+      statusEl.textContent = `数据错误：${error.message}`;
+      statusEl.className = 'error';
+    }
+  };
 }
 
-async function refresh() {
-  try {
-    const response = await fetch('/snapshot', {cache: 'no-store'});
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    statusEl.textContent = `快照 ${data.generated_at} · 最高温 ${data.max_temp_c ?? '—'} °C`;
-    statusEl.className = 'status';
+function appendPoint(target, value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return;
+  target.push({x: sequence, y: value});
+  if (target.length > maxPoints) target.shift();
+}
 
-    cpuEl.replaceChildren(...(data.cpu || []).map(cpu => {
-      const tr = document.createElement('tr');
-      tr.append(cell(cpu.cpu), cell(cpu.current_mhz), cell(cpu.max_mhz), cell(cpu.governor));
-      return tr;
-    }));
+function appendSnapshot(data) {
+  sequence++;
+  const cpus = data.cpu || [];
+  const cpuMhz = number => cpus[number]?.current_mhz;
+  appendPoint(series.cpu.little, average([0, 1, 2, 3].map(cpuMhz)));
+  appendPoint(series.cpu.mid, average([4, 5, 6].map(cpuMhz)));
+  appendPoint(series.cpu.prime, cpuMhz(7));
 
-    gpuEl.textContent = data.gpu
-      ? `${data.gpu.current_mhz} MHz / 上限 ${data.gpu.max_mhz} MHz · ${data.gpu.governor || '—'}`
-      : `不可用${data.gpu_error ? `：${data.gpu_error}` : ''}`;
+  appendPoint(series.gpu.gpu, data.gpu?.current_mhz);
+  const temps = data.thermal_summary || {};
+  appendPoint(series.temp.little, temps.cpu_little);
+  appendPoint(series.temp.mid, temps.cpu_mid);
+  appendPoint(series.temp.prime, temps.cpu_prime);
+  appendPoint(series.temp.gpu, temps.gpu);
+  appendPoint(series.temp.battery, temps.battery);
+  appendPoint(series.temp.board, temps.board);
+  appendPoint(series.current.battery, data.battery?.current_ma);
 
-    const hottest = [...(data.thermal || [])]
-      .filter(z => typeof z.temp_c === 'number')
-      .sort((a, b) => b.temp_c - a.temp_c)
-      .slice(0, 12);
-    tempsEl.replaceChildren(...hottest.map(zone => {
-      const tr = document.createElement('tr');
-      tr.append(cell(zone.zone), cell(zone.type), cell(`${zone.temp_c.toFixed(1)} °C`));
-      return tr;
-    }));
-  } catch (error) {
-    statusEl.textContent = `daemon 不可用：${error.message}`;
-    statusEl.className = 'status error';
+  statusEl.textContent = `${new Date(data.generated_at).toLocaleTimeString()} · 最高温 ${data.max_temp_c ?? '—'} °C${data.watchdog_triggered ? ' · 温控介入' : ''}`;
+  statusEl.className = data.watchdog_triggered ? 'error' : 'live';
+}
+
+function average(values) {
+  const valid = values.filter(v => typeof v === 'number' && Number.isFinite(v));
+  return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
+}
+
+function drawChart(canvas, groups, unit, fixedMin = null, fixedMax = null) {
+  const dpr = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  if (width <= 0 || height <= 0) return;
+  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const all = Object.values(groups).flat();
+  let min = fixedMin;
+  let max = fixedMax;
+  if (min === null || max === null) {
+    const values = all.map(p => p.y);
+    min = values.length ? Math.min(...values) : 0;
+    max = values.length ? Math.max(...values) : 1;
+    const pad = Math.max((max - min) * 0.12, max * 0.03, 1);
+    min -= pad;
+    max += pad;
+  }
+  if (max <= min) max = min + 1;
+
+  const margin = {left: 58, right: 18, top: 12, bottom: 28};
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillStyle = '#91a0b8';
+  ctx.strokeStyle = '#263246';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = margin.top + plotH * i / 4;
+    ctx.beginPath();
+    ctx.moveTo(margin.left, y);
+    ctx.lineTo(width - margin.right, y);
+    ctx.stroke();
+    const label = max - (max - min) * i / 4;
+    ctx.fillText(`${label.toFixed(label < 10 ? 1 : 0)}${unit}`, 4, y + 5);
+  }
+
+  if (!all.length) {
+    ctx.fillStyle = '#91a0b8';
+    ctx.fillText('等待数据…', margin.left + 16, margin.top + plotH / 2);
+    return;
+  }
+  const minX = Math.min(...all.map(p => p.x));
+  const maxX = Math.max(...all.map(p => p.x));
+  const spanX = Math.max(maxX - minX, 1);
+  for (const [name, points] of Object.entries(groups)) {
+    if (!points.length) continue;
+    ctx.strokeStyle = colors[name] || '#ffffff';
+    ctx.lineWidth = 2.4;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let started = false;
+    for (const point of points) {
+      const x = margin.left + (point.x - minX) / spanX * plotW;
+      const y = margin.top + (max - point.y) / (max - min) * plotH;
+      if (!started) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
   }
 }
 
-refresh();
-setInterval(refresh, 2000);
+const charts = {
+  cpu: document.querySelector('#cpu-chart'),
+  gpu: document.querySelector('#gpu-chart'),
+  temp: document.querySelector('#temp-chart'),
+  current: document.querySelector('#current-chart')
+};
+
+function renderAll() {
+  drawChart(charts.cpu, series.cpu, ' MHz');
+  drawChart(charts.gpu, series.gpu, ' MHz');
+  drawChart(charts.temp, series.temp, '°', 20, 100);
+  drawChart(charts.current, series.current, ' mA');
+}
+
+window.addEventListener('resize', renderAll);
+renderAll();
 </script>
 </body>
 </html>

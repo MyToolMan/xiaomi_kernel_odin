@@ -12,6 +12,7 @@ if [ -s "$DATA_DIR/web.pid" ]; then
   fi
   rm -f "$DATA_DIR/web.pid"
 fi
+rm -f "$DATA_DIR/web_token"
 
 restore_ok=0
 if [ -x "$BIN" ] && [ -S "$SOCKET" ]; then

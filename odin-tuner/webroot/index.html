@@ -12,7 +12,9 @@
     .muted { color: #9da6b8; }
     .status { margin: 18px 0; padding: 14px; border-radius: 14px; background: #1c2029; }
     .error { color: #ff9d9d; }
+    #web-status { white-space: pre-wrap; word-break: break-all; }
     button { border: 0; border-radius: 12px; padding: 12px 16px; background: #78b7ff; color: #08111e; font-weight: 700; }
+    button.secondary { margin-left: 8px; background: #344257; color: var(--text); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid #303542; }
     th { background: #202530; color: #b9c2d4; }
@@ -24,6 +26,7 @@
   <div class="muted">SukiSU WebUI · 只读快照</div>
   <div id="status" class="status">正在读取 daemon 快照…</div>
   <button id="start-web" type="button">启动浏览器服务</button>
+  <button id="stop-web" class="secondary" type="button">停止浏览器服务</button>
   <div id="web-status" class="status">浏览器服务未启动</div>
   <h2>CPU</h2>
   <table><thead><tr><th>CPU</th><th>当前 MHz</th><th>上限 MHz</th><th>Governor</th></tr></thead><tbody id="cpu"></tbody></table>
@@ -35,6 +38,7 @@ const statusEl = document.querySelector('#status');
 const cpuEl = document.querySelector('#cpu');
 const summaryEl = document.querySelector('#summary');
 const startWebEl = document.querySelector('#start-web');
+const stopWebEl = document.querySelector('#stop-web');
 const webStatusEl = document.querySelector('#web-status');
 
 function exec(command) {
@@ -90,6 +94,18 @@ startWebEl.addEventListener('click', async () => {
     webStatusEl.textContent = `启动失败：${error.message}`;
   } finally {
     startWebEl.disabled = false;
+  }
+});
+
+stopWebEl.addEventListener('click', async () => {
+  stopWebEl.disabled = true;
+  try {
+    const output = await exec('/data/adb/modules/odin-tuner/bin/stop-web.sh');
+    webStatusEl.textContent = output.trim() || '浏览器服务已停止';
+  } catch (error) {
+    webStatusEl.textContent = `停止失败：${error.message}`;
+  } finally {
+    stopWebEl.disabled = false;
   }
 });
 
