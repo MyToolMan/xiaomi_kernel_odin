@@ -496,15 +496,28 @@ func ensureConfigFile(configPath string) error {
 		if err != nil {
 			return err
 		}
-		tempPath := configPath + ".tmp"
-		if err := os.WriteFile(tempPath, append(data, '\n'), 0o600); err != nil {
+		file, err := os.CreateTemp(filepath.Dir(configPath), "."+filepath.Base(configPath)+".tmp-*")
+		if err != nil {
 			return err
 		}
-		if err := os.Rename(tempPath, configPath); err != nil {
-			_ = os.Remove(tempPath)
+		tempPath := file.Name()
+		defer os.Remove(tempPath)
+		if err := file.Chmod(0o600); err != nil {
+			file.Close()
 			return err
 		}
-		return os.Chmod(configPath, 0o600)
+		if _, err := file.Write(append(data, '\n')); err != nil {
+			file.Close()
+			return err
+		}
+		if err := file.Sync(); err != nil {
+			file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		return os.Rename(tempPath, configPath)
 	} else if !os.IsNotExist(err) {
 		return err
 	}

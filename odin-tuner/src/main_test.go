@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -170,6 +171,38 @@ func TestConfigDefaultsForExistingFile(t *testing.T) {
 	}
 	if !config.WebAutostart {
 		t.Fatal("web_autostart should default to true")
+	}
+}
+
+func TestConfigMigrationConcurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"cpu_throttle_temp":83}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const workers = 16
+	errorsFound := make(chan error, workers)
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			errorsFound <- ensureConfigFile(path)
+		}()
+	}
+	wait.Wait()
+	close(errorsFound)
+	for err := range errorsFound {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := &daemonState{configPath: path}
+	config, err := state.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.CPUThrottleTemp != 83 || config.AuthMode != "off" || !config.WebAutostart {
+		t.Fatalf("unexpected migrated config: %+v", config)
 	}
 }
 
