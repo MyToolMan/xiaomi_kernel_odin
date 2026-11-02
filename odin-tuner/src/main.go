@@ -488,8 +488,23 @@ func (s *daemonState) ensureConfig() error {
 func ensureConfigFile(configPath string) error {
 	if _, err := os.Stat(configPath); err == nil {
 		state := &daemonState{configPath: configPath}
-		_, loadErr := state.loadConfig()
-		return loadErr
+		config, loadErr := state.loadConfig()
+		if loadErr != nil {
+			return loadErr
+		}
+		data, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			return err
+		}
+		tempPath := configPath + ".tmp"
+		if err := os.WriteFile(tempPath, append(data, '\n'), 0o600); err != nil {
+			return err
+		}
+		if err := os.Rename(tempPath, configPath); err != nil {
+			_ = os.Remove(tempPath)
+			return err
+		}
+		return os.Chmod(configPath, 0o600)
 	} else if !os.IsNotExist(err) {
 		return err
 	}

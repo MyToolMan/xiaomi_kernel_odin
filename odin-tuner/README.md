@@ -111,7 +111,8 @@ record containing sensor, temperature, parameter, and frequency before/after.
 `auth_mode` defaults to `off` when absent so existing debug configs continue to
 work. `web_autostart` defaults to `true` when absent. The module action button
 restarts the Web service; use `stop-web.sh` to disable it until the next daemon
-or device restart.
+or device restart. Existing config files are rewritten with the new fields on
+startup so the active defaults are visible and editable.
 
 ## Temperature summary
 

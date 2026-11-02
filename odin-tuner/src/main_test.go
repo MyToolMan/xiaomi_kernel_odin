@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -147,6 +148,17 @@ func TestConfigDefaultsForExistingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(path, []byte(`{"cpu_throttle_temp":83}`), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if err := ensureConfigFile(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"auth_mode": "off"`) ||
+		!strings.Contains(string(data), `"web_autostart": true`) {
+		t.Fatalf("missing migrated fields:\n%s", data)
 	}
 	state := &daemonState{configPath: path}
 	config, err := state.loadConfig()
