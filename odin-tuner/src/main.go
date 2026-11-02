@@ -102,11 +102,12 @@ type backupEntry struct {
 }
 
 type daemonState struct {
-	dataDir    string
-	moduleDir  string
-	socketPath string
-	backupDir  string
-	eventsPath string
+	dataDir      string
+	moduleDir    string
+	socketPath   string
+	backupDir    string
+	eventsPath   string
+	snapshotPath string
 
 	writeMu sync.Mutex
 	specs   map[string]paramSpec
@@ -268,12 +269,13 @@ func runRestoreAll(args []string) {
 
 func newDaemonState(dataDir, moduleDir, socketPath string) (*daemonState, error) {
 	state := &daemonState{
-		dataDir:    dataDir,
-		moduleDir:  moduleDir,
-		socketPath: socketPath,
-		backupDir:  filepath.Join(dataDir, "backup"),
-		eventsPath: filepath.Join(dataDir, "events.jsonl"),
-		specs:      make(map[string]paramSpec),
+		dataDir:      dataDir,
+		moduleDir:    moduleDir,
+		socketPath:   socketPath,
+		backupDir:    filepath.Join(dataDir, "backup"),
+		eventsPath:   filepath.Join(dataDir, "events.jsonl"),
+		snapshotPath: filepath.Join(dataDir, "snapshot.json"),
+		specs:        make(map[string]paramSpec),
 	}
 	for _, dir := range []string{state.dataDir, state.backupDir, filepath.Join(state.dataDir, "logs")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -375,6 +377,12 @@ func (s *daemonState) collectOnce() {
 		s.recordEvent("watchdog_rearm", fmt.Sprintf("temperature %.1f C below rearm threshold", *snap.MaxTempC))
 	}
 	s.latest.Store(snap)
+	if data, err := json.Marshal(snap); err == nil {
+		tmp := s.snapshotPath + ".tmp"
+		if os.WriteFile(tmp, append(data, '\n'), 0o600) == nil {
+			_ = os.Rename(tmp, s.snapshotPath)
+		}
+	}
 }
 
 func readCPU() []cpuReading {

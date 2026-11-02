@@ -14,7 +14,7 @@ First-pass, userspace-only tuning module for MIX4 `odin`.
 
 ## Install
 
-Install `odin-tuner-v0.1.0.zip` from the SukiSU/Magisk module manager and reboot.
+Install `odin-tuner-v0.1.1.zip` from the SukiSU/Magisk module manager and reboot.
 The daemon socket is:
 
 ```text
@@ -41,6 +41,9 @@ Then open:
 ```text
 http://127.0.0.1:8787
 ```
+
+SukiSU Manager also exposes the on-demand `webroot/` page. It reads the
+daemon's `snapshot.json` through the KernelSU WebUI bridge.
 
 ## API
 
