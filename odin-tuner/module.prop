@@ -1,6 +1,6 @@
 id=odin-tuner
 name=ODIN Tuner Skeleton
-version=v0.1.0
-versionCode=1
+version=v0.1.1
+versionCode=2
 author=MyToolMan
 description=ODIN CPU/GPU/thermal monitor and guarded tuner skeleton
