@@ -34,6 +34,7 @@ const (
 	maximumHardTemp  = 95.0
 	watchdogRearmGap = 5.0
 	collectionPeriod = 2 * time.Second
+	defaultProfile   = "performance"
 )
 
 var (
@@ -99,6 +100,11 @@ type snapshot struct {
 	WatchdogTriggered bool               `json:"watchdog_triggered"`
 	ConfigError       string             `json:"config_error,omitempty"`
 	LastEvent         *watchdogEventInfo `json:"last_event,omitempty"`
+	ActiveProfile     string             `json:"active_profile"`
+	StartupProfile    string             `json:"startup_profile"`
+	EnforceProfile    bool               `json:"enforce_profile"`
+	Profiles          []string           `json:"profiles"`
+	Controls          []parameterReading `json:"controls"`
 }
 
 type watchdogEventInfo struct {
@@ -119,15 +125,36 @@ type watchdogConfig struct {
 	AuthMode        string  `json:"auth_mode"`
 	FixedToken      string  `json:"fixed_token"`
 	WebAutostart    bool    `json:"web_autostart"`
+	StartupProfile  string  `json:"startup_profile"`
+	EnforceProfile  bool    `json:"enforce_profile"`
 }
 
 type paramSpec struct {
 	Name      string
+	Label     string
+	Group     string
+	Unit      string
 	Path      string
 	Min       int64
 	Max       int64
+	Step      int64
 	SafeValue int64
+	Danger    bool
 	Available map[int64]struct{}
+}
+
+type parameterReading struct {
+	Name      string  `json:"name"`
+	Label     string  `json:"label"`
+	Group     string  `json:"group"`
+	Unit      string  `json:"unit,omitempty"`
+	Path      string  `json:"path"`
+	Value     int64   `json:"value"`
+	Min       int64   `json:"min"`
+	Max       int64   `json:"max"`
+	Step      int64   `json:"step"`
+	Danger    bool    `json:"danger,omitempty"`
+	Available []int64 `json:"available,omitempty"`
 }
 
 type backupEntry struct {
@@ -146,21 +173,32 @@ type daemonState struct {
 	snapshotPath string
 	configPath   string
 
-	writeMu     sync.Mutex
-	configMu    sync.RWMutex
-	config      watchdogConfig
-	subMu       sync.Mutex
-	specs       map[string]paramSpec
-	subscribers map[chan snapshot]struct{}
-	latest      atomic.Value
-	cpuHot      bool
-	gpuHot      bool
-	hardHot     bool
+	writeMu       sync.Mutex
+	configMu      sync.RWMutex
+	config        watchdogConfig
+	profileMu     sync.RWMutex
+	activeProfile string
+	subMu         sync.Mutex
+	specs         map[string]paramSpec
+	subscribers   map[chan snapshot]struct{}
+	latest        atomic.Value
+	cpuHot        bool
+	gpuHot        bool
+	hardHot       bool
 }
 
 type setRequest struct {
 	Param string      `json:"param"`
 	Value json.Number `json:"value"`
+}
+
+type profileRequest struct {
+	Name string `json:"name"`
+}
+
+type configRequest struct {
+	StartupProfile *string `json:"startup_profile,omitempty"`
+	EnforceProfile *bool   `json:"enforce_profile,omitempty"`
 }
 
 func main() {
@@ -178,7 +216,7 @@ func main() {
 	case "config-get":
 		runConfigGet(os.Args[2:])
 	case "version":
-		fmt.Println("odin-tuner v0.2.1")
+		fmt.Println("odin-tuner v0.3.0")
 	default:
 		usage()
 	}
@@ -208,6 +246,16 @@ func runDaemon(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
+	state.collectOnce()
+	startupProfile := state.currentConfig().StartupProfile
+	if startupProfile != "manual" {
+		result, applyErr := state.applyProfile(startupProfile)
+		if applyErr != nil {
+			log.Printf("startup profile %s partially failed: %v", startupProfile, applyErr)
+		} else {
+			log.Printf("startup profile %s applied: changed=%d", startupProfile, len(result.Changed))
+		}
+	}
 	state.collectOnce()
 	go state.collectLoop(ctx)
 
@@ -320,6 +368,12 @@ func runWeb(args []string) {
 			}
 		}
 	})
+	for _, endpoint := range []string{"/params", "/set", "/profile", "/config", "/restore"} {
+		endpoint := endpoint
+		mux.HandleFunc("/api"+endpoint, func(w http.ResponseWriter, r *http.Request) {
+			proxyDaemonRequest(w, r, client, target, endpoint)
+		})
+	}
 	mux.Handle("/", http.FileServer(http.Dir(*root)))
 
 	server := &http.Server{
@@ -335,6 +389,32 @@ func runWeb(args []string) {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+}
+
+func proxyDaemonRequest(w http.ResponseWriter, r *http.Request, client *http.Client, target, endpoint string) {
+	requestTarget := target + endpoint
+	if r.URL.RawQuery != "" {
+		requestTarget += "?" + r.URL.RawQuery
+	}
+	request, err := http.NewRequestWithContext(r.Context(), r.Method, requestTarget, r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	request.Header = r.Header.Clone()
+	response, err := client.Do(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer response.Body.Close()
+	for _, header := range []string{"Content-Type", "Cache-Control"} {
+		if value := response.Header.Get(header); value != "" {
+			w.Header().Set(header, value)
+		}
+	}
+	w.WriteHeader(response.StatusCode)
+	_, _ = io.Copy(w, response.Body)
 }
 
 func runRestoreAll(args []string) {
@@ -377,6 +457,10 @@ func runConfigGet(args []string) {
 		fmt.Println(config.FixedToken)
 	case "web_autostart":
 		fmt.Println(strconv.FormatBool(config.WebAutostart))
+	case "startup_profile":
+		fmt.Println(config.StartupProfile)
+	case "enforce_profile":
+		fmt.Println(strconv.FormatBool(config.EnforceProfile))
 	case "cpu_throttle_temp":
 		fmt.Println(strconv.FormatFloat(config.CPUThrottleTemp, 'f', -1, 64))
 	case "gpu_throttle_temp":
@@ -391,16 +475,17 @@ func runConfigGet(args []string) {
 
 func newDaemonState(dataDir, moduleDir, socketPath string) (*daemonState, error) {
 	state := &daemonState{
-		dataDir:      dataDir,
-		moduleDir:    moduleDir,
-		socketPath:   socketPath,
-		backupDir:    filepath.Join(dataDir, "backup"),
-		eventsPath:   filepath.Join(dataDir, "events.jsonl"),
-		snapshotPath: filepath.Join(dataDir, "snapshot.json"),
-		configPath:   filepath.Join(dataDir, "config.json"),
-		config:       defaultWatchdogConfig(),
-		specs:        make(map[string]paramSpec),
-		subscribers:  make(map[chan snapshot]struct{}),
+		dataDir:       dataDir,
+		moduleDir:     moduleDir,
+		socketPath:    socketPath,
+		backupDir:     filepath.Join(dataDir, "backup"),
+		eventsPath:    filepath.Join(dataDir, "events.jsonl"),
+		snapshotPath:  filepath.Join(dataDir, "snapshot.json"),
+		configPath:    filepath.Join(dataDir, "config.json"),
+		config:        defaultWatchdogConfig(),
+		specs:         make(map[string]paramSpec),
+		subscribers:   make(map[chan snapshot]struct{}),
+		activeProfile: "system",
 	}
 	for _, dir := range []string{state.dataDir, state.backupDir, filepath.Join(state.dataDir, "logs")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -416,57 +501,7 @@ func newDaemonState(dataDir, moduleDir, socketPath string) (*daemonState, error)
 }
 
 func (s *daemonState) discoverSpecs() {
-	clusterSpecs := []struct {
-		name      string
-		directory string
-		safe      int64
-	}{
-		{"cpu_little_max_freq", cpuDirectories[0], 1209600},
-		{"cpu_big_max_freq", cpuDirectories[1], 1555200},
-		{"cpu_prime_max_freq", cpuDirectories[2], 1900800},
-	}
-
-	for _, candidate := range clusterSpecs {
-		path := filepath.Join(candidate.directory, "scaling_max_freq")
-		minValue, err := readInt(filepath.Join(candidate.directory, "scaling_min_freq"))
-		if err != nil {
-			continue
-		}
-		maxValue, err := readInt(filepath.Join(candidate.directory, "cpuinfo_max_freq"))
-		if err != nil {
-			continue
-		}
-		available := parseIntSet(filepath.Join(candidate.directory, "scaling_available_frequencies"))
-		s.specs[candidate.name] = paramSpec{
-			Name:      candidate.name,
-			Path:      path,
-			Min:       minValue,
-			Max:       maxValue,
-			SafeValue: candidate.safe,
-			Available: available,
-		}
-	}
-
-	gpuDir := findGPUDevfreqDir()
-	if gpuDir != "" {
-		maxPath := filepath.Join(gpuDir, "max_freq")
-		available := parseIntSet(filepath.Join(gpuDir, "available_frequencies"))
-		minValue, maxValue := minMax(available)
-		if minValue == 0 || maxValue == 0 {
-			minValue, _ = readInt(filepath.Join(gpuDir, "min_freq"))
-			maxValue, _ = readInt(maxPath)
-		}
-		if minValue > 0 && maxValue >= minValue {
-			s.specs["gpu_max_freq"] = paramSpec{
-				Name:      "gpu_max_freq",
-				Path:      maxPath,
-				Min:       minValue,
-				Max:       maxValue,
-				SafeValue: safeGPUFrequency(available),
-				Available: available,
-			}
-		}
-	}
+	s.discoverParameterSpecs()
 	log.Printf("discovered %d writable parameter specs", len(s.specs))
 }
 
@@ -478,6 +513,8 @@ func defaultWatchdogConfig() watchdogConfig {
 		AuthMode:        "off",
 		FixedToken:      "",
 		WebAutostart:    true,
+		StartupProfile:  defaultProfile,
+		EnforceProfile:  true,
 	}
 }
 
@@ -492,40 +529,43 @@ func ensureConfigFile(configPath string) error {
 		if loadErr != nil {
 			return loadErr
 		}
-		data, err := json.MarshalIndent(config, "", "  ")
-		if err != nil {
-			return err
-		}
-		file, err := os.CreateTemp(filepath.Dir(configPath), "."+filepath.Base(configPath)+".tmp-*")
-		if err != nil {
-			return err
-		}
-		tempPath := file.Name()
-		defer os.Remove(tempPath)
-		if err := file.Chmod(0o600); err != nil {
-			file.Close()
-			return err
-		}
-		if _, err := file.Write(append(data, '\n')); err != nil {
-			file.Close()
-			return err
-		}
-		if err := file.Sync(); err != nil {
-			file.Close()
-			return err
-		}
-		if err := file.Close(); err != nil {
-			return err
-		}
-		return os.Rename(tempPath, configPath)
+		return writeConfigAtomic(configPath, config)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
 		return err
 	}
-	data, _ := json.MarshalIndent(defaultWatchdogConfig(), "", "  ")
-	return os.WriteFile(configPath, append(data, '\n'), 0o600)
+	return writeConfigAtomic(configPath, defaultWatchdogConfig())
+}
+
+func writeConfigAtomic(configPath string, config watchdogConfig) error {
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(configPath), "."+filepath.Base(configPath)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+	if err := file.Chmod(0o600); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, configPath)
 }
 
 func (s *daemonState) loadConfig() (watchdogConfig, error) {
@@ -566,6 +606,13 @@ func normalizeConfig(config watchdogConfig) (watchdogConfig, error) {
 	case "random":
 	default:
 		return config, fmt.Errorf("invalid auth_mode %q", config.AuthMode)
+	}
+	switch config.StartupProfile {
+	case "":
+		config.StartupProfile = defaultProfile
+	case "system", "performance", "benchmark", "safe", "manual":
+	default:
+		return config, fmt.Errorf("invalid startup_profile %q", config.StartupProfile)
 	}
 	return config, nil
 }
@@ -676,8 +723,17 @@ func (s *daemonState) collectOnce() {
 		s.gpuHot = false
 	}
 
+	if activeConfig.EnforceProfile && !s.thermalProtectionActive() {
+		s.enforceActiveProfile()
+	}
+
 	snap.WatchdogTriggered = s.cpuHot || s.gpuHot || s.hardHot
 	snap.LastEvent = s.lastEvent()
+	snap.ActiveProfile = s.currentProfile()
+	snap.StartupProfile = activeConfig.StartupProfile
+	snap.EnforceProfile = activeConfig.EnforceProfile
+	snap.Profiles = profileNames()
+	snap.Controls = s.readParameters()
 
 	data, err := json.Marshal(snap)
 	if err == nil {
@@ -931,6 +987,9 @@ func (s *daemonState) newUnixServer() *http.Server {
 		_ = json.NewEncoder(w).Encode(value)
 	})
 	mux.HandleFunc("/set", s.handleSet)
+	mux.HandleFunc("/profile", s.handleProfile)
+	mux.HandleFunc("/config", s.handleConfig)
+	mux.HandleFunc("/params", s.handleParams)
 	mux.HandleFunc("/restore", s.handleRestore)
 	mux.HandleFunc("/stream", s.handleStream)
 
@@ -1038,7 +1097,80 @@ func (s *daemonState) handleSet(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.setActiveProfile("manual")
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *daemonState) handleParams(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"profile":    s.currentProfile(),
+		"parameters": s.readParameters(),
+	})
+}
+
+func (s *daemonState) handleProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
+	var request profileRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result, err := s.applyProfile(request.Name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"ok":      false,
+			"profile": request.Name,
+			"error":   err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *daemonState) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 4<<10))
+	var request configRequest
+	if err := decoder.Decode(&request); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	config, err := s.loadConfig()
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if request.StartupProfile != nil {
+		config.StartupProfile = *request.StartupProfile
+	}
+	if request.EnforceProfile != nil {
+		config.EnforceProfile = *request.EnforceProfile
+	}
+	config, err = normalizeConfig(config)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := writeConfigAtomic(s.configPath, config); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.configMu.Lock()
+	s.config = config
+	s.configMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config": config})
 }
 
 func (s *daemonState) setParam(spec paramSpec, value int64) (map[string]any, error) {
@@ -1048,6 +1180,9 @@ func (s *daemonState) setParam(spec paramSpec, value int64) (map[string]any, err
 }
 
 func (s *daemonState) setParamLocked(spec paramSpec, value int64) (map[string]any, error) {
+	if err := validateSiblingLimit(spec, value); err != nil {
+		return nil, err
+	}
 	original, err := readString(spec.Path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", spec.Path, err)
@@ -1105,6 +1240,29 @@ func (s *daemonState) setParamLocked(spec paramSpec, value int64) (map[string]an
 		"verified": true,
 		"changed":  true,
 	}, nil
+}
+
+func validateSiblingLimit(spec paramSpec, value int64) error {
+	directory := filepath.Dir(spec.Path)
+	minFile := "scaling_min_freq"
+	maxFile := "scaling_max_freq"
+	if strings.HasPrefix(spec.Name, "gpu_") {
+		minFile = "min_freq"
+		maxFile = "max_freq"
+	}
+	switch {
+	case strings.HasSuffix(spec.Name, "_max_freq"):
+		minimum, err := readInt(filepath.Join(directory, minFile))
+		if err == nil && value < minimum {
+			return fmt.Errorf("maximum %d is below current minimum %d", value, minimum)
+		}
+	case strings.HasSuffix(spec.Name, "_min_freq"):
+		maximum, err := readInt(filepath.Join(directory, maxFile))
+		if err == nil && value > maximum {
+			return fmt.Errorf("minimum %d is above current maximum %d", value, maximum)
+		}
+	}
+	return nil
 }
 
 func (s *daemonState) ensureBackup(path string, spec paramSpec, original string) (bool, error) {
@@ -1193,6 +1351,7 @@ func (s *daemonState) restoreAll() (restoreResult, error) {
 	sort.Strings(result.Restored)
 	sort.Strings(result.Failed)
 	result.OK = len(result.Failed) == 0
+	s.setActiveProfile("system")
 	if !result.OK {
 		return result, fmt.Errorf("failed to restore %d parameter(s)", len(result.Failed))
 	}
@@ -1205,7 +1364,11 @@ func validateValue(spec paramSpec, value int64) error {
 	}
 	if len(spec.Available) > 0 {
 		if _, ok := spec.Available[value]; !ok {
-			return fmt.Errorf("value %d is not an available frequency", value)
+			// Some Qualcomm policies omit cpuinfo_max_freq from
+			// scaling_available_frequencies while still accepting it.
+			if value != spec.Max {
+				return fmt.Errorf("value %d is not an available frequency", value)
+			}
 		}
 	}
 	return nil

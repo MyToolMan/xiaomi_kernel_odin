@@ -1,6 +1,6 @@
 id=odin-tuner
-name=ODIN Tuner Skeleton
-version=v0.2.1
-versionCode=4
+name=ODIN Super Panel
+version=v0.3.0
+versionCode=5
 author=MyToolMan
-description=ODIN CPU/GPU/thermal monitor and guarded tuner skeleton
+description=ODIN Super Panel: profile unlock, guarded tuning, live telemetry

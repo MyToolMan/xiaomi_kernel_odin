@@ -59,6 +59,19 @@ func TestSetAndRestore(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsHardwareMaximumOmittedFromAvailableList(t *testing.T) {
+	spec := paramSpec{
+		Min: 844800, Max: 2995200,
+		Available: map[int64]struct{}{1900800: {}, 2841600: {}},
+	}
+	if err := validateValue(spec, 2995200); err != nil {
+		t.Fatalf("hardware maximum should be writable: %v", err)
+	}
+	if err := validateValue(spec, 2900000); err == nil {
+		t.Fatal("non-OPP frequency should be rejected")
+	}
+}
+
 func TestFailedWriteLeavesOriginalAndNoBackup(t *testing.T) {
 	root := t.TempDir()
 	node := filepath.Join(root, "scaling_max_freq")
@@ -158,7 +171,9 @@ func TestConfigDefaultsForExistingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"auth_mode": "off"`) ||
-		!strings.Contains(string(data), `"web_autostart": true`) {
+		!strings.Contains(string(data), `"web_autostart": true`) ||
+		!strings.Contains(string(data), `"startup_profile": "performance"`) ||
+		!strings.Contains(string(data), `"enforce_profile": true`) {
 		t.Fatalf("missing migrated fields:\n%s", data)
 	}
 	state := &daemonState{configPath: path}
@@ -171,6 +186,9 @@ func TestConfigDefaultsForExistingFile(t *testing.T) {
 	}
 	if !config.WebAutostart {
 		t.Fatal("web_autostart should default to true")
+	}
+	if config.StartupProfile != "performance" || !config.EnforceProfile {
+		t.Fatalf("unexpected tuning defaults: %+v", config)
 	}
 }
 
@@ -203,6 +221,21 @@ func TestConfigMigrationConcurrent(t *testing.T) {
 	}
 	if config.CPUThrottleTemp != 83 || config.AuthMode != "off" || !config.WebAutostart {
 		t.Fatalf("unexpected migrated config: %+v", config)
+	}
+}
+
+func TestConfigProfiles(t *testing.T) {
+	for _, profile := range []string{"system", "performance", "benchmark", "safe", "manual"} {
+		config, err := normalizeConfig(watchdogConfig{StartupProfile: profile, EnforceProfile: true})
+		if err != nil {
+			t.Fatalf("profile %s: %v", profile, err)
+		}
+		if config.StartupProfile != profile {
+			t.Fatalf("profile = %q, want %q", config.StartupProfile, profile)
+		}
+	}
+	if _, err := normalizeConfig(watchdogConfig{StartupProfile: "maximum-overdrive"}); err == nil {
+		t.Fatal("expected invalid profile to be rejected")
 	}
 }
 
@@ -317,5 +350,85 @@ func TestWatchdogCapsAndRecordsFrequency(t *testing.T) {
 	if event.Sensor != "cpu_prime" || event.TemperatureC != 86.5 ||
 		event.Before != 2995200 || event.After != 1900800 {
 		t.Fatalf("unexpected event: %+v", event)
+	}
+}
+
+func TestApplyProfileEnforceAndRestore(t *testing.T) {
+	root := t.TempDir()
+	backupDir := filepath.Join(root, "backup")
+	if err := os.Mkdir(backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"cpu_little_max_freq": "1209600\n",
+		"cpu_big_max_freq":    "1555200\n",
+		"cpu_prime_max_freq":  "1900800\n",
+		"gpu_max_freq":        "540000000\n",
+	}
+	specs := map[string]paramSpec{}
+	for name, value := range files {
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	specs["cpu_little_max_freq"] = paramSpec{
+		Name: "cpu_little_max_freq", Path: filepath.Join(root, "cpu_little_max_freq"),
+		Min: 300000, Max: 1804800, SafeValue: 1209600,
+		Available: map[int64]struct{}{1209600: {}, 1804800: {}},
+	}
+	specs["cpu_big_max_freq"] = paramSpec{
+		Name: "cpu_big_max_freq", Path: filepath.Join(root, "cpu_big_max_freq"),
+		Min: 710400, Max: 2419200, SafeValue: 1555200,
+		Available: map[int64]struct{}{1555200: {}, 2419200: {}},
+	}
+	specs["cpu_prime_max_freq"] = paramSpec{
+		Name: "cpu_prime_max_freq", Path: filepath.Join(root, "cpu_prime_max_freq"),
+		Min: 844800, Max: 2995200, SafeValue: 1900800,
+		Available: map[int64]struct{}{1900800: {}, 2995200: {}},
+	}
+	specs["gpu_max_freq"] = paramSpec{
+		Name: "gpu_max_freq", Path: filepath.Join(root, "gpu_max_freq"),
+		Min: 315000000, Max: 840000000, SafeValue: 540000000,
+		Available: map[int64]struct{}{315000000: {}, 540000000: {}, 840000000: {}},
+	}
+	state := &daemonState{
+		backupDir:  backupDir,
+		eventsPath: filepath.Join(root, "events.jsonl"),
+		specs:      specs,
+	}
+
+	result, err := state.applyProfile("performance")
+	if err != nil || !result.OK || len(result.Changed) != 4 {
+		t.Fatalf("apply performance: result=%+v err=%v", result, err)
+	}
+	for name, want := range map[string]string{
+		"cpu_little_max_freq": "1804800",
+		"cpu_big_max_freq":    "2419200",
+		"cpu_prime_max_freq":  "2995200",
+		"gpu_max_freq":        "840000000",
+	} {
+		if got, _ := readString(filepath.Join(root, name)); got != want {
+			t.Fatalf("%s = %s, want %s", name, got, want)
+		}
+	}
+
+	if err := os.WriteFile(specs["cpu_prime_max_freq"].Path, []byte("1900800\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state.enforceActiveProfile()
+	if got, _ := readString(specs["cpu_prime_max_freq"].Path); got != "2995200" {
+		t.Fatalf("enforcement value = %s", got)
+	}
+
+	restored, err := state.applyProfile("system")
+	if err != nil || !restored.OK {
+		t.Fatalf("restore system: %+v %v", restored, err)
+	}
+	if got, _ := readString(specs["cpu_little_max_freq"].Path); got != "1209600" {
+		t.Fatalf("restored little = %s", got)
+	}
+	if state.currentProfile() != "system" {
+		t.Fatalf("active profile = %s", state.currentProfile())
 	}
 }

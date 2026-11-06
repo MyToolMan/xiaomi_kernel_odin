@@ -1,6 +1,6 @@
-# ODIN Tuner Skeleton
+# ODIN Super Panel
 
-First-pass, userspace-only tuning module for MIX4 `odin`.
+Guarded, userspace tuning module for MIX4 `odin`.
 
 ## Scope
 
@@ -10,11 +10,13 @@ First-pass, userspace-only tuning module for MIX4 `odin`.
   every two seconds.
 - Writable parameters are exposed only when the daemon can discover and read
   the target node.
-- The Web UI only reads `/snapshot`; it has no tuning controls.
+- The Web UI exposes guarded CPU/GPU, schedutil, and scheduler controls.
+- Existing hardware OPP limits can be released without changing boot, DTBO, or
+  kernel source. This version does not add frequencies beyond the OPP table.
 
 ## Install
 
-Install `odin-tuner-v0.2.1.zip` from the SukiSU/Magisk module manager and reboot.
+Install `odin-tuner-v0.3.0.zip` from the SukiSU/Magisk module manager and reboot.
 The daemon socket is:
 
 ```text
@@ -65,6 +67,19 @@ The live page keeps 120 points, limits rendering to a maximum of 30 fps with
 reconnects with exponential backoff from one second to 30 seconds. The daemon
 sends an SSE heartbeat every 15 seconds.
 
+The Super Panel includes:
+
+- one-click `system`, `performance`, `benchmark`, and `safe` profiles;
+- a startup profile and a system-limit enforcement loop;
+- controls for CPU/GPU min/max frequency, schedutil thresholds and rate limits,
+  frame-aware scheduling, GPU force flags, and selected scheduler knobs;
+- live CPU, GPU, thermal, and battery-current charts.
+
+The default startup profile is `performance`. It raises each CPU cluster and
+GPU to the highest frequency already present in the device OPP table and keeps
+reapplying that target when a system service lowers it. Temperature watchdog
+protection always takes priority over profile enforcement.
+
 SukiSU Manager also exposes the on-demand `webroot/` page. It reads the
 daemon's `snapshot.json` through the KernelSU WebUI bridge.
 
@@ -73,16 +88,15 @@ daemon's `snapshot.json` through the KernelSU WebUI bridge.
 The control API is available over the Unix socket only:
 
 - `GET /snapshot`
+- `GET /params`
 - `POST /set` with `{"param":"cpu_little_max_freq","value":1209600}`
+- `POST /profile` with `{"name":"performance"}`
+- `POST /config` with `{"startup_profile":"performance","enforce_profile":true}`
 - `POST /restore`
 - `GET /stream` (SSE)
 
-Current tunable parameter names:
-
-- `cpu_little_max_freq`
-- `cpu_big_max_freq`
-- `cpu_prime_max_freq`
-- `gpu_max_freq`, only when the root daemon can access the KGSL devfreq node
+The Web server proxies these same operations through `/api/*`. Parameter
+availability is discovered at daemon startup; inaccessible nodes are omitted.
 
 Every write is range-checked, written, read back, and rolled back on failure.
 The first write stores the original value under `backup/`. `SIGTERM` and
@@ -99,7 +113,9 @@ module uninstall both invoke the restore path.
   "hard_limit_temp": 95,
   "auth_mode": "off",
   "fixed_token": "",
-  "web_autostart": true
+  "web_autostart": true,
+  "startup_profile": "performance",
+  "enforce_profile": true
 }
 ```
 
@@ -113,6 +129,11 @@ work. `web_autostart` defaults to `true` when absent. The module action button
 restarts the Web service; use `stop-web.sh` to disable it until the next daemon
 or device restart. Existing config files are rewritten with the new fields on
 startup so the active defaults are visible and editable.
+
+`startup_profile` accepts `system`, `performance`, `benchmark`, `safe`, or
+`manual`. With `enforce_profile` enabled, the daemon checks the active profile
+every collection cycle and restores a value changed by the system. Enforcement
+is paused while the thermal watchdog is active.
 
 ## Temperature summary
 
@@ -128,9 +149,9 @@ The frontend receives only these aggregates:
 
 Zones with temperature <= -40 °C or mode `disabled` are excluded.
 
-## Deferred to v2
+## Deferred to the kernel/DTBO stage
 
-- KGSL nodes hidden from adb shell by SELinux
+- extracting the active `dtbo_idx` and vendor OPP/CPR tables
+- adding frequencies above the existing OPP table
 - `zram0` compression algorithm
 - `vm.swappiness`
-- Tuning controls in the Web UI

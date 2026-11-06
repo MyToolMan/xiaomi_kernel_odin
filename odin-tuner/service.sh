@@ -36,6 +36,9 @@ i=0
 while [ "$i" -lt 60 ]; do
   if [ -r /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ] &&
      [ -r /sys/devices/platform/soc/3d00000.qcom,kgsl-3d0/devfreq/3d00000.qcom,kgsl-3d0/max_freq ] &&
+     [ -d /sys/devices/system/cpu/cpu0/cpufreq/schedutil ] &&
+     [ -d /sys/devices/system/cpu/cpu4/cpufreq/schedutil ] &&
+     [ -d /sys/devices/system/cpu/cpu7/cpufreq/schedutil ] &&
      [ -d /sys/class/thermal ]; then
     ready=1
     break

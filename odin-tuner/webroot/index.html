@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ODIN Tuner</title>
+  <title>ODIN Super Panel</title>
   <style>
     :root { color-scheme: dark; font-family: system-ui, sans-serif; }
     body { margin: 0; padding: 20px; background: #111318; color: #eef1f7; }
@@ -22,11 +22,11 @@
 </head>
 <body>
 <main>
-  <h1>ODIN Tuner</h1>
-  <div class="muted">SukiSU WebUI · 只读快照</div>
+  <h1>ODIN Super Panel</h1>
+  <div class="muted">KernelSU WebUI · 状态与 Web 服务入口</div>
   <div id="status" class="status">正在读取 daemon 快照…</div>
   <button id="start-web" type="button">重启 Web 服务</button>
-  <button id="stop-web" class="secondary" type="button">停止浏览器服务</button>
+  <button id="stop-web" class="secondary" type="button">关闭 Web 服务</button>
   <div id="web-status" class="status">浏览器服务未启动</div>
   <h2>CPU</h2>
   <table><thead><tr><th>CPU</th><th>当前 MHz</th><th>上限 MHz</th><th>Governor</th></tr></thead><tbody id="cpu"></tbody></table>

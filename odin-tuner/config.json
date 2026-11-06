@@ -4,5 +4,7 @@
   "hard_limit_temp": 95,
   "auth_mode": "off",
   "fixed_token": "",
-  "web_autostart": true
+  "web_autostart": true,
+  "startup_profile": "performance",
+  "enforce_profile": true
 }

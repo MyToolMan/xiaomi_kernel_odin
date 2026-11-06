@@ -3,23 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>ODIN Tuner · Live</title>
+  <title>ODIN Tuner · Super Panel</title>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0c1018;
-      --panel: #151c28;
-      --panel-edge: #273349;
-      --text: #edf4ff;
-      --muted: #91a0b8;
-      --grid: #263246;
-      --little: #65d49a;
-      --mid: #72a8ff;
-      --prime: #ffbf69;
-      --gpu: #e78cff;
-      --battery: #ff7d87;
-      --board: #68d8ed;
-      --memory: #b6c4d8;
+      --bg: #080b11;
+      --panel: #121923;
+      --panel-2: #182231;
+      --edge: #29374b;
+      --text: #eef5ff;
+      --muted: #8f9db2;
+      --green: #55dd9a;
+      --blue: #64adff;
+      --amber: #ffc15f;
+      --red: #ff6e7d;
+      --purple: #d98cff;
+      --cyan: #67dce7;
     }
     * { box-sizing: border-box; }
     html, body { min-width: 1280px; min-height: 720px; }
@@ -27,35 +26,92 @@
       margin: 0;
       min-height: 100vh;
       overflow: hidden;
-      background: radial-gradient(circle at 20% -10%, #1b2c46 0, var(--bg) 42%);
+      background:
+        radial-gradient(circle at 4% -10%, #173558 0, transparent 35%),
+        radial-gradient(circle at 100% 0, #311a42 0, transparent 30%),
+        var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
     }
-    main { height: 100vh; padding: 22px 26px 26px; display: flex; flex-direction: column; gap: 16px; }
-    header { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
-    h1 { margin: 0; font-size: 34px; letter-spacing: -0.02em; }
-    .subtitle { color: var(--muted); font-size: 17px; }
-    .header-status { display: flex; align-items: center; gap: 14px; }
-    #connection { padding: 8px 13px; border: 1px solid var(--panel-edge); border-radius: 999px; color: var(--muted); font-size: 15px; }
-    #connection::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 7px; border-radius: 50%; background: currentColor; }
-    #connection.live { color: var(--little); }
-    #connection.connecting { color: var(--prime); }
-    #connection.disconnected { color: var(--battery); }
-    #last-update { min-width: 260px; color: var(--muted); font-size: 15px; text-align: right; }
-    #last-update.alarm { color: var(--battery); }
-    .grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 16px; }
-    .card { min-height: 0; display: flex; flex-direction: column; padding: 16px 18px 12px; border: 1px solid var(--panel-edge); border-radius: 18px; background: linear-gradient(180deg, rgba(29,39,56,.96), rgba(17,23,34,.96)); box-shadow: 0 14px 35px rgba(0,0,0,.22); }
-    .card-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 8px; }
-    h2 { margin: 0; font-size: 22px; }
-    .legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 14px; }
-    .legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: currentColor; }
+    button, select, input { font: inherit; }
+    button {
+      border: 1px solid var(--edge);
+      border-radius: 11px;
+      padding: 9px 13px;
+      color: var(--text);
+      background: #202c3d;
+      cursor: pointer;
+    }
+    button:hover { border-color: #506b91; }
+    button:disabled { cursor: wait; opacity: .5; }
+    button.primary { color: #071710; background: var(--green); border-color: var(--green); font-weight: 800; }
+    button.danger { color: #27070c; background: var(--red); border-color: var(--red); font-weight: 800; }
+    select, input[type="number"] {
+      min-width: 0;
+      border: 1px solid var(--edge);
+      border-radius: 9px;
+      padding: 8px 10px;
+      color: var(--text);
+      background: #0e151f;
+    }
+    main { height: 100vh; display: flex; flex-direction: column; gap: 14px; padding: 18px 22px 22px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    h1 { margin: 0; font-size: 32px; letter-spacing: -.03em; }
+    .subtitle { color: var(--muted); font-size: 14px; margin-top: 3px; }
+    .header-meta { display: flex; align-items: center; gap: 12px; }
+    .pill { padding: 8px 12px; border: 1px solid var(--edge); border-radius: 999px; color: var(--muted); font-size: 14px; }
+    #connection::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 7px; border-radius: 50%; background: currentColor; }
+    #connection.live { color: var(--green); }
+    #connection.connecting { color: var(--amber); }
+    #connection.disconnected { color: var(--red); }
+    #last-update.alarm { color: var(--red); }
+    #active-profile { color: var(--green); font-weight: 800; }
+    .profile-bar { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--edge); border-radius: 15px; background: rgba(18,25,35,.86); }
+    .profile-bar strong { margin: 0 8px 0 4px; font-size: 14px; color: var(--muted); }
+    .profile-button.active { color: #06150e; background: var(--green); border-color: var(--green); font-weight: 800; }
+    .profile-button[data-profile="benchmark"] { color: var(--amber); }
+    .profile-button[data-profile="benchmark"].active { color: #1c1202; background: var(--amber); border-color: var(--amber); }
+    .profile-button[data-profile="system"] { color: var(--red); }
+    .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 430px minmax(0, 1fr); gap: 14px; }
+    .sidebar, .chart-card { border: 1px solid var(--edge); border-radius: 17px; background: linear-gradient(180deg, rgba(24,34,49,.97), rgba(14,20,29,.97)); box-shadow: 0 16px 44px rgba(0,0,0,.24); }
+    .sidebar { min-height: 0; display: flex; flex-direction: column; }
+    .sidebar-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--edge); }
+    .sidebar-head h2 { margin: 0; font-size: 19px; }
+    .sidebar-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--edge); }
+    .setting { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+    .setting.wide { grid-column: span 1; }
+    .setting label { min-height: 15px; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
+    .switch-row span { font-size: 12px; color: var(--muted); }
+    .controls { min-height: 0; overflow: auto; padding: 10px 12px 18px; scrollbar-color: #3d506b #111822; }
+    .control-group { margin-top: 9px; border: 1px solid #233146; border-radius: 12px; overflow: hidden; }
+    .group-title { display: flex; justify-content: space-between; padding: 9px 11px; color: #b9c9df; background: #1b2636; font-size: 13px; font-weight: 700; }
+    .control { display: grid; grid-template-columns: minmax(0, 1fr) 118px 58px; gap: 7px; align-items: center; padding: 8px 9px; border-top: 1px solid #202c3e; }
+    .control:first-of-type { border-top: 0; }
+    .control-label { min-width: 0; }
+    .control-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .control-value { color: var(--muted); font-size: 11px; }
+    .control.danger .control-name { color: var(--red); }
+    .control select { width: 100%; font-size: 12px; }
+    .control button { padding: 7px 8px; font-size: 12px; }
+    .charts { min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; }
+    .chart-card { min-height: 0; display: flex; flex-direction: column; padding: 13px 15px 10px; }
+    .chart-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
+    .chart-head h2 { margin: 0; font-size: 18px; }
+    .chart-summary { color: var(--muted); font-size: 12px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 12px; }
+    .legend span::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; background: currentColor; }
     canvas { width: 100%; min-height: 0; flex: 1; }
-    .c-little { color: var(--little); } .c-mid { color: var(--mid); } .c-prime { color: var(--prime); }
-    .c-gpu { color: var(--gpu); } .c-battery { color: var(--battery); } .c-board { color: var(--board); }
-    .c-memory { color: var(--memory); }
+    .green { color: var(--green); } .blue { color: var(--blue); } .amber { color: var(--amber); }
+    .purple { color: var(--purple); } .red { color: var(--red); } .cyan { color: var(--cyan); }
+    #toast { position: fixed; right: 24px; bottom: 24px; max-width: 480px; padding: 12px 16px; border: 1px solid var(--edge); border-radius: 12px; color: var(--text); background: #1c2838; box-shadow: 0 12px 36px rgba(0,0,0,.4); opacity: 0; transform: translateY(8px); transition: .18s ease; pointer-events: none; }
+    #toast.show { opacity: 1; transform: translateY(0); }
     @media (max-width: 1400px) {
-      html, body { min-width: 1024px; min-height: 640px; }
-      h1 { font-size: 28px; } h2 { font-size: 19px; }
+      html, body { min-width: 1080px; min-height: 680px; }
+      main { padding: 14px 16px 16px; }
+      .workspace { grid-template-columns: 380px minmax(0, 1fr); }
+      h1 { font-size: 27px; }
     }
   </style>
 </head>
@@ -63,62 +119,107 @@
 <main>
   <header>
     <div>
-      <h1>ODIN Tuner</h1>
-      <div class="subtitle">MIX4 · 实时只读性能快照 · SSE</div>
+      <h1>ODIN Super Panel</h1>
+      <div class="subtitle">MIX4 · 当前档位解锁 · 系统回写压制 · 内核安全阀</div>
     </div>
-    <div class="header-status">
-      <div id="last-update">最后更新 —</div>
-      <div id="connection" class="connecting">正在连接 SSE…</div>
+    <div class="header-meta">
+      <div id="active-profile" class="pill">profile: —</div>
+      <div id="last-update" class="pill">最后更新 —</div>
+      <div id="connection" class="pill connecting">正在连接 SSE…</div>
     </div>
   </header>
-  <div class="grid">
-    <section class="card">
-      <div class="card-head">
-        <h2>CPU 频率</h2>
-        <div class="legend"><span class="c-little">little</span><span class="c-mid">mid</span><span class="c-prime">prime</span></div>
+
+  <section class="profile-bar">
+    <strong>一键配置</strong>
+    <button class="profile-button" data-profile="system">系统恢复</button>
+    <button class="profile-button" data-profile="performance">性能释放</button>
+    <button class="profile-button" data-profile="benchmark">跑分锁定</button>
+    <button class="profile-button" data-profile="safe">安全降温</button>
+    <span id="profile-note" class="subtitle">性能模式会持续压制 MIUI 的系统上限回写，温度保护始终优先。</span>
+  </section>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h2>高级调参</h2>
+        <p>只显示 root 实际可读的节点；写入均带范围校验、回读与自动回滚。</p>
       </div>
-      <canvas id="cpu-chart" aria-label="CPU frequency chart"></canvas>
-    </section>
-    <section class="card">
-      <div class="card-head">
-        <h2>GPU 频率</h2>
-        <div class="legend"><span class="c-gpu">GPU MHz</span></div>
+      <div class="settings">
+        <div class="setting">
+          <label for="startup-profile">开机配置</label>
+          <select id="startup-profile">
+            <option value="performance">性能释放</option>
+            <option value="benchmark">跑分锁定</option>
+            <option value="safe">安全降温</option>
+            <option value="system">系统恢复</option>
+            <option value="manual">仅手动</option>
+          </select>
+        </div>
+        <div class="setting">
+          <label>&nbsp;</label>
+          <button id="save-settings" class="primary">保存开机设置</button>
+        </div>
+        <div class="setting wide">
+          <div class="switch-row">
+            <span>持续压制系统上限回写</span>
+            <label><input id="enforce-profile" type="checkbox"> 开启</label>
+          </div>
+        </div>
+        <div class="setting wide">
+          <button id="restore-all">恢复全部原始值</button>
+        </div>
       </div>
-      <canvas id="gpu-chart" aria-label="GPU frequency chart"></canvas>
-    </section>
-    <section class="card">
-      <div class="card-head">
-        <h2>温度</h2>
-        <div class="legend"><span class="c-little">little</span><span class="c-mid">mid</span><span class="c-prime">prime</span><span class="c-gpu">GPU</span><span class="c-battery">电池</span><span class="c-board">主板</span></div>
+      <div id="controls" class="controls">
+        <div class="subtitle">等待可调参数…</div>
       </div>
-      <canvas id="temp-chart" aria-label="Temperature chart"></canvas>
-    </section>
-    <section class="card">
-      <div class="card-head">
-        <h2>电池电流</h2>
-        <div class="legend"><span class="c-battery">mA</span></div>
-      </div>
-      <canvas id="current-chart" aria-label="Battery current chart"></canvas>
-    </section>
+    </aside>
+
+    <div class="charts">
+      <section class="chart-card">
+        <div class="chart-head">
+          <h2>CPU 频率</h2>
+          <div class="legend"><span class="green">little</span><span class="blue">mid</span><span class="amber">prime</span></div>
+        </div>
+        <div id="cpu-summary" class="chart-summary">—</div>
+        <canvas id="cpu-chart" aria-label="CPU frequency chart"></canvas>
+      </section>
+      <section class="chart-card">
+        <div class="chart-head">
+          <h2>GPU 频率</h2>
+          <div class="legend"><span class="purple">GPU MHz</span></div>
+        </div>
+        <div id="gpu-summary" class="chart-summary">—</div>
+        <canvas id="gpu-chart" aria-label="GPU frequency chart"></canvas>
+      </section>
+      <section class="chart-card">
+        <div class="chart-head">
+          <h2>温度</h2>
+          <div class="legend"><span class="green">little</span><span class="blue">mid</span><span class="amber">prime</span><span class="purple">GPU</span><span class="red">电池</span><span class="cyan">主板</span></div>
+        </div>
+        <div id="temp-summary" class="chart-summary">—</div>
+        <canvas id="temp-chart" aria-label="Temperature chart"></canvas>
+      </section>
+      <section class="chart-card">
+        <div class="chart-head">
+          <h2>电池电流</h2>
+          <div class="legend"><span class="red">mA</span></div>
+        </div>
+        <div id="current-summary" class="chart-summary">—</div>
+        <canvas id="current-chart" aria-label="Battery current chart"></canvas>
+      </section>
+    </div>
   </div>
 </main>
+<div id="toast"></div>
 <script>
-const connectionEl = document.querySelector('#connection');
-const lastUpdateEl = document.querySelector('#last-update');
 const token = new URLSearchParams(location.search).get('token');
-const streamUrl = token ? `/stream?token=${encodeURIComponent(token)}` : '/stream';
+const tokenSuffix = token ? `?token=${encodeURIComponent(token)}` : '';
+const streamUrl = `/stream${tokenSuffix}`;
 const maxPoints = 120;
 const reconnectMax = 30000;
-let sequence = 0;
-let source = null;
-let reconnectDelay = 1000;
-let reconnectTimer = null;
-let lastMessageAt = 0;
-let renderScheduled = false;
-let lastRenderAt = 0;
 const colors = {
-  little: '#65d49a', mid: '#72a8ff', prime: '#ffbf69',
-  gpu: '#e78cff', battery: '#ff7d87', board: '#68d8ed', memory: '#b6c4d8'
+  little: '#55dd9a', mid: '#64adff', prime: '#ffc15f',
+  gpu: '#d98cff', battery: '#ff6e7d', board: '#67dce7'
 };
 const series = {
   cpu: {little: [], mid: [], prime: []},
@@ -126,10 +227,40 @@ const series = {
   temp: {little: [], mid: [], prime: [], gpu: [], battery: [], board: []},
   current: {battery: []}
 };
+const connectionEl = document.querySelector('#connection');
+const lastUpdateEl = document.querySelector('#last-update');
+const activeProfileEl = document.querySelector('#active-profile');
+const profileNoteEl = document.querySelector('#profile-note');
+const controlsEl = document.querySelector('#controls');
+const startupProfileEl = document.querySelector('#startup-profile');
+const enforceProfileEl = document.querySelector('#enforce-profile');
+const saveSettingsEl = document.querySelector('#save-settings');
+const restoreAllEl = document.querySelector('#restore-all');
+const toastEl = document.querySelector('#toast');
+
+let sequence = 0;
+let source = null;
+let reconnectDelay = 1000;
+let reconnectTimer = null;
+let lastMessageAt = 0;
+let lastSnapshot = null;
+let controlsSignature = '';
+let startupProfileInitialized = false;
+let renderScheduled = false;
+let lastRenderAt = 0;
+let toastTimer = 0;
 
 function setConnection(state, text) {
-  connectionEl.className = state;
+  connectionEl.className = `pill ${state}`;
   connectionEl.textContent = text;
+}
+
+function showToast(message, error = false) {
+  toastEl.textContent = message;
+  toastEl.style.borderColor = error ? 'var(--red)' : 'var(--green)';
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 3200);
 }
 
 function connectStream() {
@@ -138,8 +269,7 @@ function connectStream() {
   const current = new EventSource(streamUrl);
   source = current;
   current.onopen = () => {
-    if (source !== current) return;
-    setConnection('live', 'SSE 已连接');
+    if (source === current) setConnection('live', 'SSE 已连接');
   };
   current.onerror = () => {
     if (source !== current) return;
@@ -153,11 +283,12 @@ function connectStream() {
     reconnectDelay = 1000;
     lastMessageAt = Date.now();
     try {
-      appendSnapshot(JSON.parse(event.data));
+      lastSnapshot = JSON.parse(event.data);
+      appendSnapshot(lastSnapshot);
       scheduleRender();
     } catch (error) {
       lastUpdateEl.textContent = `数据错误：${error.message}`;
-      lastUpdateEl.className = 'alarm';
+      lastUpdateEl.className = 'pill alarm';
     }
   };
 }
@@ -172,6 +303,74 @@ function scheduleReconnect() {
   }, wait);
 }
 
+function api(path, options = {}) {
+  const separator = tokenSuffix ? '&' : '?';
+  const url = `/api/${path}${tokenSuffix}${tokenSuffix ? separator + '_=' + Date.now() : '?_=' + Date.now()}`;
+  return fetch(url, {
+    ...options,
+    headers: {'Content-Type': 'application/json', ...(options.headers || {})}
+  }).then(async response => {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    return data;
+  });
+}
+
+async function applyProfile(name) {
+  setProfileButtonsDisabled(true);
+  try {
+    const result = await api('profile', {method: 'POST', body: JSON.stringify({name})});
+    const retry = result.failed?.length ? `，${result.failed.length} 项等待自动重试` : '';
+    showToast(`${profileLabel(name)}已启用，变更 ${result.changed?.length || 0} 项${retry}`);
+  } catch (error) {
+    showToast(`配置应用失败：${error.message}`, true);
+  } finally {
+    setProfileButtonsDisabled(false);
+  }
+}
+
+function profileLabel(name) {
+  return ({system: '系统恢复', performance: '性能释放', benchmark: '跑分锁定', safe: '安全降温', manual: '手动模式'})[name] || name;
+}
+
+function setProfileButtonsDisabled(disabled) {
+  document.querySelectorAll('.profile-button').forEach(button => button.disabled = disabled);
+}
+
+document.querySelectorAll('.profile-button').forEach(button => {
+  button.addEventListener('click', () => applyProfile(button.dataset.profile));
+});
+
+saveSettingsEl.addEventListener('click', async () => {
+  saveSettingsEl.disabled = true;
+  try {
+    await api('config', {
+      method: 'POST',
+      body: JSON.stringify({
+        startup_profile: startupProfileEl.value,
+        enforce_profile: enforceProfileEl.checked
+      })
+    });
+    showToast('开机配置已保存');
+  } catch (error) {
+    showToast(`保存失败：${error.message}`, true);
+  } finally {
+    saveSettingsEl.disabled = false;
+  }
+});
+
+restoreAllEl.addEventListener('click', async () => {
+  restoreAllEl.disabled = true;
+  try {
+    const result = await api('restore', {method: 'POST'});
+    showToast(`已恢复 ${result.restored?.length || 0} 个节点`);
+  } catch (error) {
+    showToast(`恢复失败：${error.message}`, true);
+  } finally {
+    restoreAllEl.disabled = false;
+  }
+});
+
 function appendPoint(target, value) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return;
   target.push({x: sequence, y: value});
@@ -181,11 +380,10 @@ function appendPoint(target, value) {
 function appendSnapshot(data) {
   sequence++;
   const cpus = data.cpu || [];
-  const cpuMhz = number => cpus[number]?.current_mhz;
+  const cpuMhz = index => cpus[index]?.current_mhz;
   appendPoint(series.cpu.little, average([0, 1, 2, 3].map(cpuMhz)));
   appendPoint(series.cpu.mid, average([4, 5, 6].map(cpuMhz)));
   appendPoint(series.cpu.prime, cpuMhz(7));
-
   appendPoint(series.gpu.gpu, data.gpu?.current_mhz);
   const temps = data.thermal_summary || {};
   appendPoint(series.temp.little, temps.cpu_little);
@@ -197,12 +395,140 @@ function appendSnapshot(data) {
   appendPoint(series.current.battery, data.battery?.current_ma);
 
   const updatedAt = new Date(data.generated_at).toLocaleTimeString();
-  lastUpdateEl.textContent = `最后更新 ${updatedAt} · 最高温 ${data.max_temp_c ?? '—'} °C${data.watchdog_triggered ? ' · 温控介入' : ''}`;
-  lastUpdateEl.className = data.watchdog_triggered ? 'alarm' : '';
+  lastUpdateEl.textContent = `最后更新 ${updatedAt}`;
+  lastUpdateEl.className = `pill${data.watchdog_triggered ? ' alarm' : ''}`;
+  activeProfileEl.textContent = `profile: ${profileLabel(data.active_profile)}`;
+  activeProfileEl.style.color = data.active_profile === 'benchmark' ? 'var(--amber)' : 'var(--green)';
+  profileNoteEl.textContent = data.enforce_profile
+    ? '系统回写压制已开启；温度 watchdog 始终优先，超过阈值会自动降频。'
+    : '系统回写压制已关闭；MIUI 可以在运行中重新降低频率上限。';
+  if (document.activeElement !== enforceProfileEl) {
+    enforceProfileEl.checked = Boolean(data.enforce_profile);
+  }
+  if (!startupProfileInitialized && data.profiles?.includes(data.startup_profile)) {
+    startupProfileEl.value = data.startup_profile;
+    startupProfileInitialized = true;
+  }
+  document.querySelectorAll('.profile-button').forEach(button => {
+    button.classList.toggle('active', button.dataset.profile === data.active_profile);
+  });
+  renderControls(data.controls || []);
+  updateSummaries(data);
+}
+
+function updateSummaries(data) {
+  const cpus = data.cpu || [];
+  document.querySelector('#cpu-summary').textContent =
+    `cur ${cpus.map(cpu => cpu.current_mhz).join(' / ')} MHz · max ${cpus[0]?.max_mhz || '—'} / ${cpus[4]?.max_mhz || '—'} / ${cpus[7]?.max_mhz || '—'} MHz`;
+  document.querySelector('#gpu-summary').textContent =
+    data.gpu ? `${data.gpu.current_mhz} / ${data.gpu.max_mhz} MHz · ${data.gpu.governor || '—'}` : data.gpu_error || 'GPU 不可用';
+  document.querySelector('#temp-summary').textContent =
+    `最高 ${data.max_temp_c ?? '—'} °C${data.watchdog_triggered ? ' · 温控介入' : ' · 安全'}`;
+  document.querySelector('#current-summary').textContent =
+    data.battery ? `${data.battery.current_ma} mA` : '电池节点不可用';
+}
+
+function renderControls(controls) {
+  const signature = controls.map(control => control.name).join('|');
+  if (signature !== controlsSignature) {
+    controlsSignature = signature;
+    controlsEl.replaceChildren(...buildControlGroups(controls));
+  }
+  controls.forEach(control => {
+    const input = controlsEl.querySelector(`[data-value-for="${CSS.escape(control.name)}"]`);
+    if (input && document.activeElement !== input) input.value = String(control.value);
+    const label = controlsEl.querySelector(`[data-current-for="${CSS.escape(control.name)}"]`);
+    if (label) label.textContent = `当前 ${formatValue(control, control.value)}`;
+  });
+}
+
+function buildControlGroups(controls) {
+  const groups = new Map();
+  controls.forEach(control => {
+    if (!groups.has(control.group)) groups.set(control.group, []);
+    groups.get(control.group).push(control);
+  });
+  const result = [];
+  for (const [group, items] of groups) {
+    const section = document.createElement('section');
+    section.className = 'control-group';
+    const title = document.createElement('div');
+    title.className = 'group-title';
+    title.innerHTML = `<span>${escapeHTML(group)}</span><span>${items.length} 项</span>`;
+    section.append(title);
+    items.forEach(control => section.append(buildControlRow(control)));
+    result.push(section);
+  }
+  return result;
+}
+
+function buildControlRow(control) {
+  const row = document.createElement('div');
+  row.className = `control${control.danger ? ' danger' : ''}`;
+  const label = document.createElement('div');
+  label.className = 'control-label';
+  const name = document.createElement('span');
+  name.className = 'control-name';
+  name.textContent = control.label;
+  name.title = control.path;
+  const current = document.createElement('span');
+  current.className = 'control-value';
+  current.dataset.currentFor = control.name;
+  current.textContent = `当前 ${formatValue(control, control.value)}`;
+  label.append(name, current);
+
+  let input;
+  if (control.available?.length) {
+    input = document.createElement('select');
+    control.available.slice().reverse().forEach(value => {
+      const option = document.createElement('option');
+      option.value = String(value);
+      option.textContent = formatValue(control, value);
+      input.append(option);
+    });
+  } else {
+    input = document.createElement('input');
+    input.type = 'number';
+    input.min = String(control.min);
+    input.max = String(control.max);
+    input.step = String(control.step);
+  }
+  input.dataset.valueFor = control.name;
+  input.value = String(control.value);
+  const apply = document.createElement('button');
+  apply.textContent = '应用';
+  apply.addEventListener('click', async () => {
+    apply.disabled = true;
+    try {
+      await api('set', {method: 'POST', body: JSON.stringify({param: control.name, value: Number(input.value)})});
+      showToast(`${control.label}已写入并回读确认`);
+    } catch (error) {
+      showToast(`写入失败：${error.message}`, true);
+    } finally {
+      apply.disabled = false;
+    }
+  });
+  row.append(label, input, apply);
+  return row;
+}
+
+function formatValue(control, value) {
+  if (control.available?.length === 2 && control.min === 0 && control.max === 1) {
+    return value ? '开启' : '关闭';
+  }
+  if (control.unit === 'kHz') return `${(value / 1000).toFixed(value % 1000 ? 1 : 0)} MHz`;
+  if (control.unit === 'Hz') return `${(value / 1000000).toFixed(0)} MHz`;
+  return control.unit ? `${value} ${control.unit}` : String(value);
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[character]);
 }
 
 function average(values) {
-  const valid = values.filter(v => typeof v === 'number' && Number.isFinite(v));
+  const valid = values.filter(value => typeof value === 'number' && Number.isFinite(value));
   return valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : null;
 }
 
@@ -218,53 +544,49 @@ function drawChart(view, groups, unit, fixedMin = null, fixedMax = null) {
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
-
   const all = Object.values(groups).flat();
   let min = fixedMin;
   let max = fixedMax;
   if (min === null || max === null) {
-    const values = all.map(p => p.y);
+    const values = all.map(point => point.y);
     min = values.length ? Math.min(...values) : 0;
     max = values.length ? Math.max(...values) : 1;
-    const pad = Math.max((max - min) * 0.12, max * 0.03, 1);
+    const pad = Math.max((max - min) * .12, max * .03, 1);
     min -= pad;
     max += pad;
   }
   if (max <= min) max = min + 1;
-
-  const margin = {left: 58, right: 18, top: 12, bottom: 28};
+  const margin = {left: 58, right: 16, top: 8, bottom: 24};
   const plotW = width - margin.left - margin.right;
   const plotH = height - margin.top - margin.bottom;
-  ctx.font = '14px system-ui, sans-serif';
-  ctx.fillStyle = '#91a0b8';
-  ctx.strokeStyle = '#263246';
+  ctx.font = '12px system-ui, sans-serif';
+  ctx.fillStyle = '#8f9db2';
+  ctx.strokeStyle = '#263448';
   ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = margin.top + plotH * i / 4;
+  for (let index = 0; index <= 4; index++) {
+    const y = margin.top + plotH * index / 4;
     ctx.beginPath();
     ctx.moveTo(margin.left, y);
     ctx.lineTo(width - margin.right, y);
     ctx.stroke();
-    const label = max - (max - min) * i / 4;
-    ctx.fillText(`${label.toFixed(label < 10 ? 1 : 0)}${unit}`, 4, y + 5);
+    const label = max - (max - min) * index / 4;
+    ctx.fillText(`${label.toFixed(label < 10 ? 1 : 0)}${unit}`, 4, y + 4);
   }
-
   if (!all.length) {
-    ctx.fillStyle = '#91a0b8';
-    ctx.fillText('等待数据…', margin.left + 16, margin.top + plotH / 2);
+    ctx.fillText('等待数据…', margin.left + 14, margin.top + plotH / 2);
     return;
   }
-  const minX = Math.min(...all.map(p => p.x));
-  const maxX = Math.max(...all.map(p => p.x));
+  const minX = Math.min(...all.map(point => point.x));
+  const maxX = Math.max(...all.map(point => point.x));
   const spanX = Math.max(maxX - minX, 1);
   for (const [name, points] of Object.entries(groups)) {
     if (!points.length) continue;
     ctx.strokeStyle = colors[name] || '#ffffff';
-    ctx.lineWidth = 2.4;
+    ctx.lineWidth = 2.3;
     ctx.lineJoin = 'round';
     ctx.beginPath();
     let started = false;
-    for (const point of points) {
+    points.forEach(point => {
       const x = margin.left + (point.x - minX) / spanX * plotW;
       const y = margin.top + (max - point.y) / (max - min) * plotH;
       if (!started) {
@@ -273,7 +595,7 @@ function drawChart(view, groups, unit, fixedMin = null, fixedMax = null) {
       } else {
         ctx.lineTo(x, y);
       }
-    }
+    });
     ctx.stroke();
   }
 }
@@ -297,6 +619,21 @@ function renderAll() {
   drawChart(charts.current, series.current, ' mA');
 }
 
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  const frame = timestamp => {
+    if (timestamp - lastRenderAt < 1000 / 30) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    renderScheduled = false;
+    lastRenderAt = timestamp;
+    renderAll();
+  };
+  requestAnimationFrame(frame);
+}
+
 window.addEventListener('resize', scheduleRender);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
@@ -316,21 +653,6 @@ document.addEventListener('visibilitychange', () => {
     scheduleRender();
   }
 });
-
-function scheduleRender() {
-  if (renderScheduled) return;
-  renderScheduled = true;
-  const frame = timestamp => {
-    if (timestamp - lastRenderAt < 1000 / 30) {
-      requestAnimationFrame(frame);
-      return;
-    }
-    renderScheduled = false;
-    lastRenderAt = timestamp;
-    renderAll();
-  };
-  requestAnimationFrame(frame);
-}
 
 connectStream();
 renderAll();

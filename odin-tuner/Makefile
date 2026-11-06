@@ -1,5 +1,5 @@
 BINARY := bin/odin-tuner
-MODULE_ZIP := ../odin-tuner-v0.2.1.zip
+MODULE_ZIP := ../odin-tuner-v0.3.0.zip
 
 .PHONY: build package clean
 
