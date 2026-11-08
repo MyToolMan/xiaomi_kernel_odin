@@ -80,6 +80,16 @@ func (s *daemonState) discoverParameterSpecs() {
 		addIntegerSpec(s, filepath.Join(gpuDir, "mod_percent"), "gpu_mod_percent", "活跃度阈值", "GPU · 高级", "%", 0, 100, 1, false)
 		addIntegerSpec(s, filepath.Join(gpuDir, "polling_interval"), "gpu_polling_interval", "轮询间隔", "GPU · 高级", "ms", 0, 1000, 1, false)
 	}
+	if coolingDir := findCoolingDeviceByType("thermal-devfreq-0"); coolingDir != "" {
+		maximum, err := readInt(filepath.Join(coolingDir, "max_state"))
+		if err == nil && maximum >= 0 {
+			s.addSpec(paramSpec{
+				Name: "gpu_thermal_cooling", Label: "GPU 热控上限", Group: "GPU · 高级", Unit: "state",
+				Path: filepath.Join(coolingDir, "cur_state"), Min: 0, Max: maximum, Step: 1,
+				SafeValue: maximum, Danger: true,
+			})
+		}
+	}
 
 	s.addSpec(paramSpec{
 		Name: "sched_util_clamp_min", Label: "调度最低利用率", Group: "内核调度", Unit: "util",
@@ -91,6 +101,17 @@ func (s *daemonState) discoverParameterSpecs() {
 	})
 	addBinarySpec(s, "/proc/sys/kernel/sched_energy_aware", "sched_energy_aware", "EAS 能效调度", "内核调度")
 	addIntegerSpec(s, "/proc/sys/kernel/perf_cpu_time_max_percent", "perf_cpu_time_max_percent", "Perf 采样上限", "内核调度", "%", 0, 100, 1, false)
+}
+
+func findCoolingDeviceByType(target string) string {
+	directories, _ := filepath.Glob("/sys/class/thermal/cooling_device*")
+	for _, directory := range directories {
+		deviceType, err := readString(filepath.Join(directory, "type"))
+		if err == nil && deviceType == target {
+			return directory
+		}
+	}
+	return ""
 }
 
 func (s *daemonState) addSpec(spec paramSpec) {

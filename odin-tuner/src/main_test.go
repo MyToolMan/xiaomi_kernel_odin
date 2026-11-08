@@ -432,3 +432,35 @@ func TestApplyProfileEnforceAndRestore(t *testing.T) {
 		t.Fatalf("active profile = %s", state.currentProfile())
 	}
 }
+
+func TestProfileReleasesAndRestoresGPUCoolingState(t *testing.T) {
+	root := t.TempDir()
+	backupDir := filepath.Join(root, "backup")
+	if err := os.Mkdir(backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	coolingPath := filepath.Join(root, "gpu_cooling_state")
+	if err := os.WriteFile(coolingPath, []byte("4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := paramSpec{
+		Name: "gpu_thermal_cooling", Path: coolingPath,
+		Min: 0, Max: 4, Step: 1, SafeValue: 4,
+	}
+	state := &daemonState{
+		backupDir:  backupDir,
+		eventsPath: filepath.Join(root, "events.jsonl"),
+		specs:      map[string]paramSpec{spec.Name: spec},
+	}
+	result, err := state.applyProfile("performance")
+	if err != nil || len(result.Changed) != 1 {
+		t.Fatalf("release cooling: result=%+v err=%v", result, err)
+	}
+	if got, _ := readString(coolingPath); got != "0" {
+		t.Fatalf("cooling state = %s, want 0", got)
+	}
+	state.applySafeCaps("gpu_throttle", "gpu", 86, []string{"gpu_thermal_cooling"})
+	if got, _ := readString(coolingPath); got != "4" {
+		t.Fatalf("safe cooling state = %s, want 4", got)
+	}
+}

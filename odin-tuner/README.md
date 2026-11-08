@@ -16,7 +16,7 @@ Guarded, userspace tuning module for MIX4 `odin`.
 
 ## Install
 
-Install `odin-tuner-v0.3.0.zip` from the SukiSU/Magisk module manager and reboot.
+Install `odin-tuner-v0.3.1.zip` from the SukiSU/Magisk module manager and reboot.
 The daemon socket is:
 
 ```text
@@ -79,6 +79,11 @@ The default startup profile is `performance`. It raises each CPU cluster and
 GPU to the highest frequency already present in the device OPP table and keeps
 reapplying that target when a system service lowers it. Temperature watchdog
 protection always takes priority over profile enforcement.
+
+The performance and benchmark profiles also release the writable KGSL
+`thermal-devfreq-0` cooling state so the configured GPU OPP ceiling can actually
+be reached. The thermal watchdog restores the maximum cooling state before
+frequency caps whenever the GPU or hard temperature threshold is reached.
 
 SukiSU Manager also exposes the on-demand `webroot/` page. It reads the
 daemon's `snapshot.json` through the KernelSU WebUI bridge.

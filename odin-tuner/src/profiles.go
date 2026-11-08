@@ -71,6 +71,9 @@ func (s *daemonState) profileTargets(name string) ([]profileTarget, error) {
 				targets = append(targets, profileTarget{Param: param, Value: spec.Max})
 			}
 		}
+		if spec, ok := s.specs["gpu_thermal_cooling"]; ok {
+			targets = append(targets, profileTarget{Param: "gpu_thermal_cooling", Value: spec.Min})
+		}
 	case "benchmark":
 		for _, param := range maxFreqNames {
 			if spec, ok := s.specs[param]; ok {
@@ -85,11 +88,17 @@ func (s *daemonState) profileTargets(name string) ([]profileTarget, error) {
 				})
 			}
 		}
+		if spec, ok := s.specs["gpu_thermal_cooling"]; ok {
+			targets = append(targets, profileTarget{Param: "gpu_thermal_cooling", Value: spec.Min})
+		}
 	case "safe":
 		for _, param := range maxFreqNames {
 			if spec, ok := s.specs[param]; ok && spec.SafeValue > 0 {
 				targets = append(targets, profileTarget{Param: param, Value: spec.SafeValue})
 			}
+		}
+		if spec, ok := s.specs["gpu_thermal_cooling"]; ok {
+			targets = append(targets, profileTarget{Param: "gpu_thermal_cooling", Value: spec.SafeValue})
 		}
 	default:
 		return nil, fmt.Errorf("unknown profile %q", name)

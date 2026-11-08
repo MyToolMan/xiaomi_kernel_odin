@@ -1,0 +1,20 @@
+--- a/vendor-dtb/00.dts
++++ b/vendor-dtb/00.dts
+@@ -18270,4 +18270,4 @@
+ 					qcom,gpu-pwrlevel@0 {
+ 						reg = <0x0>;
+-						qcom,gpu-freq = <0x32116200>;
++						qcom,gpu-freq = <0x32f643c0>;
+ 						qcom,level = <0x1a0>;
+@@ -18707,4 +18707,4 @@
+ 					qcom,gpu-pwrlevel@0 {
+ 						reg = <0x0>;
+-						qcom,gpu-freq = <0x32116200>;
++						qcom,gpu-freq = <0x32f643c0>;
+ 						qcom,level = <0x1a0>;
+@@ -18844,4 +18844,4 @@
+ 					qcom,gpu-pwrlevel@0 {
+ 						reg = <0x0>;
+-						qcom,gpu-freq = <0x32116200>;
++						qcom,gpu-freq = <0x32f643c0>;
+ 						qcom,level = <0x1a0>;

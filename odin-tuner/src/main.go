@@ -216,7 +216,7 @@ func main() {
 	case "config-get":
 		runConfigGet(os.Args[2:])
 	case "version":
-		fmt.Println("odin-tuner v0.3.0")
+		fmt.Println("odin-tuner v0.3.1")
 	default:
 		usage()
 	}
@@ -696,7 +696,7 @@ func (s *daemonState) collectOnce() {
 		if !s.hardHot {
 			s.hardHot = true
 			s.applySafeCaps("hard_limit", "thermal_summary_max", *anyTemp, []string{
-				"cpu_little_max_freq", "cpu_big_max_freq", "cpu_prime_max_freq", "gpu_max_freq",
+				"cpu_little_max_freq", "cpu_big_max_freq", "cpu_prime_max_freq", "gpu_max_freq", "gpu_thermal_cooling",
 			})
 		}
 	} else if anyTemp != nil && *anyTemp < activeConfig.HardLimitTemp-watchdogRearmGap {
@@ -717,7 +717,7 @@ func (s *daemonState) collectOnce() {
 	if gpuTemp != nil && *gpuTemp >= activeConfig.GPUThrottleTemp {
 		if !s.gpuHot {
 			s.gpuHot = true
-			s.applySafeCaps("gpu_throttle", "gpu", *gpuTemp, []string{"gpu_max_freq"})
+			s.applySafeCaps("gpu_throttle", "gpu", *gpuTemp, []string{"gpu_max_freq", "gpu_thermal_cooling"})
 		}
 	} else if gpuTemp != nil && *gpuTemp < activeConfig.GPUThrottleTemp-watchdogRearmGap {
 		s.gpuHot = false
@@ -958,12 +958,21 @@ func (s *daemonState) applySafeCaps(eventType, sensor string, temperature float6
 		}
 		after := before
 		detail := "already at or below safety cap"
-		if before > spec.SafeValue {
+		needsCap := before > spec.SafeValue
+		if name == "gpu_thermal_cooling" {
+			needsCap = before < spec.SafeValue
+			detail = "already at maximum cooling state"
+		}
+		if needsCap {
 			if _, err := s.setParamLocked(spec, spec.SafeValue); err != nil {
 				detail = "cap failed: " + err.Error()
 			} else {
 				after = spec.SafeValue
-				detail = "frequency capped"
+				if name == "gpu_thermal_cooling" {
+					detail = "maximum cooling state restored"
+				} else {
+					detail = "frequency capped"
+				}
 			}
 		}
 		s.recordEvent(eventType, sensor, temperature, name, before, after, detail)
