@@ -16,7 +16,7 @@ Guarded, userspace tuning module for MIX4 `odin`.
 
 ## Install
 
-Install `odin-tuner-v0.3.1.zip` from the SukiSU/Magisk module manager and reboot.
+Install `odin-tuner-v0.3.2.zip` from the SukiSU/Magisk module manager and reboot.
 The daemon socket is:
 
 ```text
@@ -44,7 +44,9 @@ su -c 'sh /data/adb/modules/odin-tuner/bin/stop-web.sh'
 
 `start-web.sh` is idempotent: it prints the active URL instead of starting a
 second server. The default listen address is `0.0.0.0:8787`; override it with
-`ODIN_WEB_LISTEN`.
+`ODIN_WEB_LISTEN`. The script moves the Web process into the root cgroup so a
+Web restart launched from the root manager cannot be frozen together with the
+manager when it goes into the background.
 
 Authentication is controlled by `auth_mode`:
 

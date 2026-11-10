@@ -33,10 +33,21 @@ print_urls() {
   echo "listen: $LISTEN"
 }
 
+detach_web_cgroup() {
+  web_pid="$1"
+  if [ -w /sys/fs/cgroup/cgroup.procs ]; then
+    if echo "$web_pid" > /sys/fs/cgroup/cgroup.procs 2>/dev/null; then
+      return 0
+    fi
+  fi
+  echo "WARNING: failed to move web service $web_pid out of inherited app cgroup" >&2
+}
+
 if [ -s "$PID_FILE" ]; then
   old_pid=$(cat "$PID_FILE" 2>/dev/null)
   if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null &&
      tr '\000' ' ' < "/proc/$old_pid/cmdline" 2>/dev/null | grep -q "odin-tuner web"; then
+    detach_web_cgroup "$old_pid"
     token=$(cat "$TOKEN_FILE" 2>/dev/null)
     echo "web service already running: pid=$old_pid"
     print_urls "$token" "$auth_mode"
@@ -85,6 +96,7 @@ nohup "$BIN" web \
 pid=$!
 echo "$pid" > "$PID_FILE"
 chmod 600 "$PID_FILE"
+detach_web_cgroup "$pid"
 sleep 1
 
 if kill -0 "$pid" 2>/dev/null &&
