@@ -1,6 +1,6 @@
 id=odin-tuner
-name=ODIN Super Panel
-version=v0.3.2
-versionCode=7
+name=VOLT FORGE
+version=v0.4.0
+versionCode=8
 author=MyToolMan
-description=ODIN Super Panel: profile unlock, guarded tuning, live telemetry
+description=Android hardware control system with guarded tuning and live telemetry

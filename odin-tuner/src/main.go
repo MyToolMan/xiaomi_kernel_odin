@@ -216,7 +216,7 @@ func main() {
 	case "config-get":
 		runConfigGet(os.Args[2:])
 	case "version":
-		fmt.Println("odin-tuner v0.3.2")
+		fmt.Println("volt-forge v0.4.0")
 	default:
 		usage()
 	}

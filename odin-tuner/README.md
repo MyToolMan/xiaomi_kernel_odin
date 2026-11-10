@@ -1,6 +1,6 @@
-# ODIN Super Panel
+# VOLT FORGE
 
-Guarded, userspace tuning module for MIX4 `odin`.
+ANDROID HARDWARE CONTROL SYSTEM for MIX4 `odin`.
 
 ## Scope
 
@@ -16,7 +16,7 @@ Guarded, userspace tuning module for MIX4 `odin`.
 
 ## Install
 
-Install `odin-tuner-v0.3.2.zip` from the SukiSU/Magisk module manager and reboot.
+Install `odin-tuner-v0.4.0.zip` from the SukiSU/Magisk module manager and reboot.
 The daemon socket is:
 
 ```text
@@ -64,18 +64,33 @@ the frontend forwards it to the SSE stream automatically.
 `fixed` or `random`.** Use only on a trusted network and stop the service when
 recording or testing is finished. Never expose port 8787 to the public internet.
 
-The live page keeps 120 points, limits rendering to a maximum of 30 fps with
-`requestAnimationFrame`, reports green/yellow/red SSE connection state, and
-reconnects with exponential backoff from one second to 30 seconds. The daemon
-sends an SSE heartbeat every 15 seconds.
+VOLT FORGE uses a fixed-capacity 300-sample ring buffer, a single long-lived
+SSE connection, a hash-based page router, and persistent Canvas chart
+instances. Chart drawing is time-axis based, limited by
+`requestAnimationFrame`, paused while the page is hidden, and supports 30 s,
+60 s, and 5 min windows with monotone cubic interpolation, crosshairs, and
+tooltips. Telemetry values are updated in place without rebuilding controls or
+reconnecting on page changes. The SSE connection reports green/yellow/red
+state and reconnects with exponential backoff from one second to 30 seconds.
+The daemon sends an SSE heartbeat every 15 seconds.
 
-The Super Panel includes:
+The frontend includes:
 
 - one-click `system`, `performance`, `benchmark`, and `safe` profiles;
 - a startup profile and a system-limit enforcement loop;
 - controls for CPU/GPU min/max frequency, schedutil thresholds and rate limits,
   frame-aware scheduling, GPU force flags, and selected scheduler knobs;
 - live CPU, GPU, thermal, and battery-current charts.
+- independent OVERVIEW, CPU LAB, GPU LAB, VOLTAGE LAB, THERMAL LAB, POWER LAB,
+  PROFILES, and SYSTEM workspaces;
+- staged multi-parameter writes, current/target/verified values, per-item reset,
+  full restore, high-risk confirmation, and client-side configuration export.
+
+The frontend is dependency-free static HTML/CSS/JavaScript:
+
+- `webui/index.html`: visual system and layout shell;
+- `webui/app.js`: router, data store, ring buffer, chart engine, control state,
+  and API adapter.
 
 The default startup profile is `performance`. It raises each CPU cluster and
 GPU to the highest frequency already present in the device OPP table and keeps
