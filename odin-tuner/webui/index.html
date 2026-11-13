@@ -637,11 +637,12 @@
       <div class="profile-grid">
         <article class="profile-card" data-profile-card="system"><h3>SYSTEM RESTORE</h3><div class="profile-status">ORIGINAL NODE VALUES</div><p>恢复首次写入前保存的全部节点，并停止性能配置强制回写。</p><button class="danger" data-profile="system">APPLY RESTORE</button></article>
         <article class="profile-card" data-profile-card="performance"><h3>PERFORMANCE</h3><div class="profile-status">DEFAULT / DAILY TUNING</div><p>将现有 CPU/GPU OPP 提升到硬件上限，并持续压制系统回写。</p><button class="primary" data-profile="performance">APPLY PROFILE</button></article>
+        <article class="profile-card" data-profile-card="extreme"><h3>EXTREME</h3><div class="profile-status">738 MHz GPU FLOOR / WATCHDOG ACTIVE</div><p>在 PERFORMANCE 基础上把 GPU 下限提升到 738 MHz，适合录制和高负载游戏，空闲功耗会上升。</p><button class="warning" data-profile="extreme">APPLY EXTREME</button></article>
         <article class="profile-card" data-profile-card="benchmark"><h3>BENCHMARK</h3><div class="profile-status">HIGH RISK / THERMAL WATCHDOG ACTIVE</div><p>提高最低频率并锁定 GPU 下限，只适合短时压力测试。</p><button class="warning" data-profile="benchmark">ARM BENCHMARK</button></article>
         <article class="profile-card" data-profile-card="safe"><h3>SAFE / COOLING</h3><div class="profile-status">REDUCED FREQUENCY CEILING</div><p>恢复安全频率上限并提高 GPU 冷却约束，适合高温环境。</p><button data-profile="safe">APPLY SAFE</button></article>
       </div>
       <div class="config-panel">
-        <div class="field"><label for="startup-profile">STARTUP PROFILE</label><select id="startup-profile"><option value="performance">PERFORMANCE</option><option value="benchmark">BENCHMARK</option><option value="safe">SAFE</option><option value="system">SYSTEM</option><option value="manual">MANUAL ONLY</option></select></div>
+        <div class="field"><label for="startup-profile">STARTUP PROFILE</label><select id="startup-profile"><option value="performance">PERFORMANCE</option><option value="extreme">EXTREME</option><option value="benchmark">BENCHMARK</option><option value="safe">SAFE</option><option value="system">SYSTEM</option><option value="manual">MANUAL ONLY</option></select></div>
         <div class="field"><label for="enforce-profile">SYSTEM LIMIT ENFORCEMENT</label><select id="enforce-profile"><option value="true">ENABLED</option><option value="false">DISABLED</option></select></div>
         <button id="save-settings" class="primary">SAVE BOOT POLICY</button>
         <button id="restore-all" class="danger">RESTORE ALL</button>

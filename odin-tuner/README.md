@@ -16,7 +16,7 @@ ANDROID HARDWARE CONTROL SYSTEM for MIX4 `odin`.
 
 ## Install
 
-Install `odin-tuner-v0.4.0.zip` from the SukiSU/Magisk module manager and reboot.
+Install `odin-tuner-v0.5.0.zip` from the SukiSU/Magisk module manager and reboot.
 The daemon socket is:
 
 ```text
@@ -76,7 +76,7 @@ The daemon sends an SSE heartbeat every 15 seconds.
 
 The frontend includes:
 
-- one-click `system`, `performance`, `benchmark`, and `safe` profiles;
+- one-click `system`, `performance`, `extreme`, `benchmark`, and `safe` profiles;
 - a startup profile and a system-limit enforcement loop;
 - controls for CPU/GPU min/max frequency, schedutil thresholds and rate limits,
   frame-aware scheduling, GPU force flags, and selected scheduler knobs;
@@ -152,7 +152,7 @@ restarts the Web service; use `stop-web.sh` to disable it until the next daemon
 or device restart. Existing config files are rewritten with the new fields on
 startup so the active defaults are visible and editable.
 
-`startup_profile` accepts `system`, `performance`, `benchmark`, `safe`, or
+`startup_profile` accepts `system`, `performance`, `extreme`, `benchmark`, `safe`, or
 `manual`. With `enforce_profile` enabled, the daemon checks the active profile
 every collection cycle and restores a value changed by the system. Enforcement
 is paused while the thermal watchdog is active.

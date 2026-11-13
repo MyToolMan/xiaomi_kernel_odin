@@ -610,7 +610,7 @@ func normalizeConfig(config watchdogConfig) (watchdogConfig, error) {
 	switch config.StartupProfile {
 	case "":
 		config.StartupProfile = defaultProfile
-	case "system", "performance", "benchmark", "safe", "manual":
+	case "system", "performance", "extreme", "benchmark", "safe", "manual":
 	default:
 		return config, fmt.Errorf("invalid startup_profile %q", config.StartupProfile)
 	}

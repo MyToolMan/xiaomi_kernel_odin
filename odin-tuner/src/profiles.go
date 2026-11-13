@@ -19,7 +19,7 @@ type profileResult struct {
 }
 
 func profileNames() []string {
-	return []string{"system", "performance", "benchmark", "safe", "manual"}
+	return []string{"system", "performance", "extreme", "benchmark", "safe", "manual"}
 }
 
 func validProfile(name string) bool {
@@ -74,6 +74,21 @@ func (s *daemonState) profileTargets(name string) ([]profileTarget, error) {
 		if spec, ok := s.specs["gpu_thermal_cooling"]; ok {
 			targets = append(targets, profileTarget{Param: "gpu_thermal_cooling", Value: spec.Min})
 		}
+	case "extreme":
+		for _, param := range maxFreqNames {
+			if spec, ok := s.specs[param]; ok {
+				targets = append(targets, profileTarget{Param: param, Value: spec.Max})
+			}
+		}
+		if spec, ok := s.specs["gpu_min_freq"]; ok {
+			targets = append(targets, profileTarget{
+				Param: "gpu_min_freq",
+				Value: frequencyAtLeast(spec, 738000000),
+			})
+		}
+		if spec, ok := s.specs["gpu_thermal_cooling"]; ok {
+			targets = append(targets, profileTarget{Param: "gpu_thermal_cooling", Value: spec.Min})
+		}
 	case "benchmark":
 		for _, param := range maxFreqNames {
 			if spec, ok := s.specs[param]; ok {
@@ -104,6 +119,16 @@ func (s *daemonState) profileTargets(name string) ([]profileTarget, error) {
 		return nil, fmt.Errorf("unknown profile %q", name)
 	}
 	return targets, nil
+}
+
+func frequencyAtLeast(spec paramSpec, target int64) int64 {
+	values := sortedAvailable(spec.Available)
+	for _, value := range values {
+		if value >= target {
+			return value
+		}
+	}
+	return spec.Max
 }
 
 func frequencyAtRatio(spec paramSpec, ratio float64) int64 {

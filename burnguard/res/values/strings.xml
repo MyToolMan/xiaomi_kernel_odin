@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VOLT FORGE Burn Guard</string>
+    <string name="notification_channel">Burn-in protection</string>
+    <string name="notification_title">Top screen mask active</string>
+    <string name="notification_text">Static black mask; no animation or polling</string>
+</resources>

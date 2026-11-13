@@ -11,6 +11,7 @@
   const PROFILE_LABELS = {
     system: 'SYSTEM RESTORE',
     performance: 'PERFORMANCE',
+    extreme: 'EXTREME',
     benchmark: 'BENCHMARK',
     safe: 'SAFE / COOLING',
     manual: 'MANUAL'

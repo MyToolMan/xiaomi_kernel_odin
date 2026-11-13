@@ -6,6 +6,15 @@ LOG_FILE="$LOG_DIR/daemon.log"
 PID_FILE="$DATA_DIR/daemon.pid"
 SOCKET="$DATA_DIR/odin-tuner.sock"
 BIN="$MODDIR/bin/odin-tuner"
+BURN_GUARD_PACKAGE=com.miuitoolman.voltforge.burnguard
+
+start_burn_guard_if_installed() {
+  if pm path "$BURN_GUARD_PACKAGE" >/dev/null 2>&1; then
+    am start --user 0 \
+      -n "$BURN_GUARD_PACKAGE/.MainActivity" \
+      --ez autostart true >/dev/null 2>&1 || true
+  fi
+}
 
 start_web_if_configured() {
   web_autostart=$("$BIN" config-get --config "$DATA_DIR/config.json" --field web_autostart 2>/dev/null || echo false)
@@ -27,6 +36,7 @@ if [ -s "$PID_FILE" ]; then
      grep -q odin-tuner "/proc/$old_pid/cmdline" 2>/dev/null; then
     echo "odin-tuner already running: pid=$old_pid"
     start_web_if_configured
+    start_burn_guard_if_installed
     exit 0
   fi
 fi
@@ -73,6 +83,7 @@ while [ "$i" -lt 20 ]; do
     chmod 660 "$SOCKET"
     echo "odin-tuner ready: pid=$pid socket=$SOCKET"
     start_web_if_configured
+    start_burn_guard_if_installed
     exit 0
   fi
   if ! kill -0 "$pid" 2>/dev/null; then

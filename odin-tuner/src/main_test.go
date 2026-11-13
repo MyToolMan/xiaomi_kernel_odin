@@ -433,6 +433,53 @@ func TestApplyProfileEnforceAndRestore(t *testing.T) {
 	}
 }
 
+func TestExtremeProfileSetsGPUMinimum(t *testing.T) {
+	root := t.TempDir()
+	backupDir := filepath.Join(root, "backup")
+	if err := os.Mkdir(backupDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	maxPath := filepath.Join(root, "gpu_max_freq")
+	minPath := filepath.Join(root, "gpu_min_freq")
+	if err := os.WriteFile(maxPath, []byte("540000000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(minPath, []byte("315000000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	available := map[int64]struct{}{
+		315000000: {}, 540000000: {}, 738000000: {}, 855000000: {},
+	}
+	state := &daemonState{
+		backupDir:  backupDir,
+		eventsPath: filepath.Join(root, "events.jsonl"),
+		specs: map[string]paramSpec{
+			"gpu_max_freq": {
+				Name: "gpu_max_freq", Path: maxPath,
+				Min: 315000000, Max: 855000000, Available: available,
+			},
+			"gpu_min_freq": {
+				Name: "gpu_min_freq", Path: minPath,
+				Min: 315000000, Max: 855000000, Available: available,
+			},
+		},
+	}
+
+	result, err := state.applyProfile("extreme")
+	if err != nil || !result.OK {
+		t.Fatalf("apply extreme: result=%+v err=%v", result, err)
+	}
+	if got, _ := readString(maxPath); got != "855000000" {
+		t.Fatalf("gpu max = %s", got)
+	}
+	if got, _ := readString(minPath); got != "738000000" {
+		t.Fatalf("gpu min = %s", got)
+	}
+	if got := state.currentProfile(); got != "extreme" {
+		t.Fatalf("active profile = %s", got)
+	}
+}
+
 func TestProfileReleasesAndRestoresGPUCoolingState(t *testing.T) {
 	root := t.TempDir()
 	backupDir := filepath.Join(root, "backup")
